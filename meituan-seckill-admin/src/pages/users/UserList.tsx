@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react'
 import { Table, Button, Space, Tag, Modal, Form, Input, Switch, message } from 'antd'
-import { PlusOutlined, EditOutlined, DeleteOutlined } from '@ant-design/icons'
+import { PlusOutlined, EditOutlined, DeleteOutlined, ExclamationCircleFilled } from '@ant-design/icons'
 import * as userApi from '../../api/user'
 
 interface User {
@@ -24,6 +24,11 @@ const UserList = () => {
     const [form] = Form.useForm()
     const [currentUser, setCurrentUser] = useState<User | null>(null)
     const [modalTitle, setModalTitle] = useState('创建用户')
+
+    // 添加删除确认对话框相关状态
+    const [deleteConfirmVisible, setDeleteConfirmVisible] = useState(false);
+    const [deleteId, setDeleteId] = useState<number | null>(null);
+    const [deleteUsername, setDeleteUsername] = useState<string>('');
 
     const fetchUsers = async () => {
         try {
@@ -92,31 +97,29 @@ const UserList = () => {
         }
     }
 
-    const handleDelete = (id: number) => {
-        console.log('删除按钮被点击，ID:', id);
+    const handleDelete = (id: number, username: string) => {
+        console.log('删除按钮被点击，ID:', id, '用户名:', username);
+        setDeleteId(id);
+        setDeleteUsername(username);
+        setDeleteConfirmVisible(true);
+    };
 
-        // 使用原生confirm，避免antd Modal可能的问题
-        if (window.confirm('确定要删除这个用户吗？此操作不可恢复。')) {
-            console.log('用户确认删除');
-            try {
-                // 使用立即执行的异步函数
-                (async () => {
-                    try {
-                        console.log('执行删除操作，ID:', id);
-                        const response = await userApi.deleteUser(id);
-                        console.log('删除用户响应:', response);
-                        message.success('删除用户成功');
-                        fetchUsers();
-                    } catch (error) {
-                        console.error('删除用户失败:', error);
-                        message.error('删除用户失败，请稍后重试');
-                    }
-                })();
-            } catch (error) {
-                console.error('执行删除时出错:', error);
-            }
-        } else {
-            console.log('用户取消删除');
+    const confirmDelete = async () => {
+        if (deleteId === null) return;
+
+        try {
+            console.log('执行删除操作，ID:', deleteId);
+            const response = await userApi.deleteUser(deleteId);
+            console.log('删除用户响应:', response);
+            message.success('删除用户成功');
+            fetchUsers();
+        } catch (error) {
+            console.error('删除用户失败:', error);
+            message.error('删除用户失败，请稍后重试');
+        } finally {
+            setDeleteConfirmVisible(false);
+            setDeleteId(null);
+            setDeleteUsername('');
         }
     };
 
@@ -168,7 +171,7 @@ const UserList = () => {
                         size="small"
                         onClick={() => {
                             console.log('点击删除按钮');
-                            handleDelete(record.id);
+                            handleDelete(record.id, record.username);
                         }}
                     >
                         删除
@@ -247,6 +250,27 @@ const UserList = () => {
                         </Form.Item>
                     )}
                 </Form>
+            </Modal>
+
+            <Modal
+                title={
+                    <div style={{ display: 'flex', alignItems: 'center' }}>
+                        <ExclamationCircleFilled style={{ color: '#ff4d4f', marginRight: 8 }} />
+                        <span>确认删除</span>
+                    </div>
+                }
+                open={deleteConfirmVisible}
+                onOk={confirmDelete}
+                onCancel={() => setDeleteConfirmVisible(false)}
+                okText="确认删除"
+                cancelText="取消"
+                okButtonProps={{ danger: true }}
+            >
+                <div style={{ padding: '20px 0' }}>
+                    <p>您确定要删除以下用户吗？</p>
+                    <p style={{ fontWeight: 'bold', margin: '10px 0' }}>{deleteUsername}</p>
+                    <p style={{ color: '#ff4d4f' }}>警告：此操作不可恢复，删除后用户数据将永久丢失！</p>
+                </div>
             </Modal>
         </div>
     )

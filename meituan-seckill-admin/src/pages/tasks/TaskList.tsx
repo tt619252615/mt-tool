@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react'
 import { Table, Button, Space, Tag, Modal, Form, Input, InputNumber, Switch, TimePicker, message } from 'antd'
-import { PlusOutlined, EditOutlined, DeleteOutlined, PlayCircleOutlined, PauseCircleOutlined } from '@ant-design/icons'
+import { PlusOutlined, EditOutlined, DeleteOutlined, PlayCircleOutlined, PauseCircleOutlined, ExclamationCircleFilled } from '@ant-design/icons'
 import * as tasksApi from '../../api/tasks'
 import type { Task as ApiTask, CreateTaskParams as ApiCreateTaskParams, UpdateTaskParams as ApiUpdateTaskParams } from '../../api/tasks'
 import dayjs from 'dayjs'
@@ -89,6 +89,16 @@ const TaskList = () => {
     const [form] = Form.useForm()
     const [currentTask, setCurrentTask] = useState<Task | null>(null)
     const [modalTitle, setModalTitle] = useState('创建抢券任务')
+
+    // 添加删除确认对话框相关状态
+    const [deleteConfirmVisible, setDeleteConfirmVisible] = useState(false);
+    const [deleteId, setDeleteId] = useState<number | null>(null);
+    const [deleteName, setDeleteName] = useState<string>('');
+
+    // 添加状态切换确认对话框相关状态
+    const [toggleConfirmVisible, setToggleConfirmVisible] = useState(false);
+    const [toggleTask, setToggleTask] = useState<Task | null>(null);
+    const [toggleAction, setToggleAction] = useState<string>('');
 
     const fetchTasks = async () => {
         try {
@@ -207,31 +217,29 @@ const TaskList = () => {
         }
     }
 
-    const handleDelete = (id: number) => {
-        console.log('删除任务按钮被点击，ID:', id);
+    const handleDelete = (id: number, name: string) => {
+        console.log('删除任务按钮被点击，ID:', id, '名称:', name);
+        setDeleteId(id);
+        setDeleteName(name);
+        setDeleteConfirmVisible(true);
+    };
 
-        // 使用原生confirm，避免antd Modal可能的问题
-        if (window.confirm('确定要删除这个抢券任务吗？此操作不可恢复。')) {
-            console.log('用户确认删除');
-            try {
-                // 使用立即执行的异步函数
-                (async () => {
-                    try {
-                        console.log('执行删除操作，ID:', id);
-                        const response = await tasksApi.deleteTask(id);
-                        console.log('删除任务响应:', response);
-                        message.success('删除抢券任务成功');
-                        fetchTasks();
-                    } catch (error) {
-                        console.error('删除抢券任务失败:', error);
-                        message.error('删除抢券任务失败，请稍后重试');
-                    }
-                })();
-            } catch (error) {
-                console.error('执行删除时出错:', error);
-            }
-        } else {
-            console.log('用户取消删除');
+    const confirmDelete = async () => {
+        if (deleteId === null) return;
+
+        try {
+            console.log('执行删除操作，ID:', deleteId);
+            const response = await tasksApi.deleteTask(deleteId);
+            console.log('删除任务响应:', response);
+            message.success('删除抢券任务成功');
+            fetchTasks();
+        } catch (error) {
+            console.error('删除抢券任务失败:', error);
+            message.error('删除抢券任务失败，请稍后重试');
+        } finally {
+            setDeleteConfirmVisible(false);
+            setDeleteId(null);
+            setDeleteName('');
         }
     };
 
@@ -239,31 +247,32 @@ const TaskList = () => {
         const newStatus = !record.is_active;
         const action = newStatus ? '启用' : '禁用';
 
-        console.log(`${action}任务按钮被点击，ID:`, record.id, '当前状态:', record.is_active, '新状态:', newStatus);
+        console.log(`${action}任务按钮被点击，ID:`, record.id, '名称:', record.name);
+        setToggleTask(record);
+        setToggleAction(action);
+        setToggleConfirmVisible(true);
+    };
 
-        // 使用原生confirm，避免antd Modal可能的问题
-        if (window.confirm(`确定要${action}这个抢券任务吗？`)) {
-            console.log(`用户确认${action}`);
-            try {
-                // 使用立即执行的异步函数
-                (async () => {
-                    try {
-                        console.log(`执行${action}操作，ID:`, record.id);
-                        const status = newStatus ? 'running' : 'paused';
-                        const response = await tasksApi.updateTaskStatus(record.id, status);
-                        console.log(`${action}任务响应:`, response);
-                        message.success(`${action}抢券任务成功`);
-                        fetchTasks();
-                    } catch (error) {
-                        console.error(`${action}抢券任务失败:`, error);
-                        message.error(`${action}抢券任务失败，请稍后重试`);
-                    }
-                })();
-            } catch (error) {
-                console.error(`执行${action}时出错:`, error);
-            }
-        } else {
-            console.log(`用户取消${action}`);
+    const confirmToggle = async () => {
+        if (toggleTask === null) return;
+
+        const newStatus = !toggleTask.is_active;
+        const action = toggleAction;
+
+        try {
+            console.log(`执行${action}操作，ID:`, toggleTask.id);
+            const status = newStatus ? 'running' : 'paused';
+            const response = await tasksApi.updateTaskStatus(toggleTask.id, status);
+            console.log(`${action}任务响应:`, response);
+            message.success(`${action}抢券任务成功`);
+            fetchTasks();
+        } catch (error) {
+            console.error(`${action}抢券任务失败:`, error);
+            message.error(`${action}抢券任务失败，请稍后重试`);
+        } finally {
+            setToggleConfirmVisible(false);
+            setToggleTask(null);
+            setToggleAction('');
         }
     };
 
@@ -340,7 +349,7 @@ const TaskList = () => {
                         size="small"
                         onClick={() => {
                             console.log('点击删除按钮');
-                            handleDelete(record.id);
+                            handleDelete(record.id, record.name);
                         }}
                     >
                         删除
@@ -441,6 +450,56 @@ const TaskList = () => {
                         <Switch />
                     </Form.Item>
                 </Form>
+            </Modal>
+
+            <Modal
+                title={
+                    <div style={{ display: 'flex', alignItems: 'center' }}>
+                        <ExclamationCircleFilled style={{ color: '#ff4d4f', marginRight: 8 }} />
+                        <span>确认删除</span>
+                    </div>
+                }
+                open={deleteConfirmVisible}
+                onOk={confirmDelete}
+                onCancel={() => setDeleteConfirmVisible(false)}
+                okText="确认删除"
+                cancelText="取消"
+                okButtonProps={{ danger: true }}
+            >
+                <div style={{ padding: '20px 0' }}>
+                    <p>您确定要删除以下抢券任务吗？</p>
+                    <p style={{ fontWeight: 'bold', margin: '10px 0' }}>{deleteName}</p>
+                    <p style={{ color: '#ff4d4f' }}>警告：此操作不可恢复，删除后任务将永久丢失！</p>
+                </div>
+            </Modal>
+
+            <Modal
+                title={
+                    <div style={{ display: 'flex', alignItems: 'center' }}>
+                        <ExclamationCircleFilled style={{ color: toggleAction === '启用' ? '#52c41a' : '#faad14', marginRight: 8 }} />
+                        <span>确认{toggleAction}</span>
+                    </div>
+                }
+                open={toggleConfirmVisible}
+                onOk={confirmToggle}
+                onCancel={() => setToggleConfirmVisible(false)}
+                okText={`确认${toggleAction}`}
+                cancelText="取消"
+                okButtonProps={{
+                    type: 'primary',
+                    danger: toggleAction === '禁用',
+                    style: toggleAction === '启用' ? { backgroundColor: '#52c41a', borderColor: '#52c41a' } : {}
+                }}
+            >
+                <div style={{ padding: '20px 0' }}>
+                    <p>您确定要{toggleAction}以下抢券任务吗？</p>
+                    <p style={{ fontWeight: 'bold', margin: '10px 0' }}>{toggleTask?.name}</p>
+                    {toggleAction === '启用' ? (
+                        <p style={{ color: '#52c41a' }}>启用后，任务将按计划执行。</p>
+                    ) : (
+                        <p style={{ color: '#faad14' }}>禁用后，任务将暂停执行，但可随时重新启用。</p>
+                    )}
+                </div>
             </Modal>
         </div>
     )

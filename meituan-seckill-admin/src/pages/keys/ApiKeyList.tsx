@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react'
 import { Table, Button, Space, Tag, Progress, Modal, Form, Input, InputNumber, Switch, message, Typography } from 'antd'
-import { PlusOutlined, EditOutlined, DeleteOutlined, ReloadOutlined, CopyOutlined } from '@ant-design/icons'
+import { PlusOutlined, EditOutlined, DeleteOutlined, ReloadOutlined, CopyOutlined, ExclamationCircleFilled } from '@ant-design/icons'
 import * as keysApi from '../../api/keys'
 
 interface ApiKey {
@@ -38,6 +38,16 @@ const ApiKeyList = () => {
     const [currentApiKey, setCurrentApiKey] = useState<ApiKey | null>(null)
     const [modalTitle, setModalTitle] = useState('创建API密钥')
     const [newApiKey, setNewApiKey] = useState<string>('')
+
+    // 添加删除确认对话框相关状态
+    const [deleteConfirmVisible, setDeleteConfirmVisible] = useState(false);
+    const [deleteId, setDeleteId] = useState<number | null>(null);
+    const [deleteName, setDeleteName] = useState<string>('');
+
+    // 添加重置确认对话框相关状态
+    const [resetConfirmVisible, setResetConfirmVisible] = useState(false);
+    const [resetId, setResetId] = useState<number | null>(null);
+    const [resetName, setResetName] = useState<string>('');
 
     const fetchApiKeys = async () => {
         try {
@@ -116,59 +126,55 @@ const ApiKeyList = () => {
         }
     }
 
-    const handleDelete = (id: number) => {
-        console.log('删除API密钥按钮被点击，ID:', id);
+    const handleDelete = (id: number, name: string) => {
+        console.log('删除API密钥按钮被点击，ID:', id, '名称:', name);
+        setDeleteId(id);
+        setDeleteName(name);
+        setDeleteConfirmVisible(true);
+    };
 
-        // 使用原生confirm，避免antd Modal可能的问题
-        if (window.confirm('确定要删除这个API密钥吗？此操作不可恢复。')) {
-            console.log('用户确认删除');
-            try {
-                // 使用立即执行的异步函数
-                (async () => {
-                    try {
-                        console.log('执行删除操作，ID:', id);
-                        const response = await keysApi.deleteApiKey(id);
-                        console.log('删除API密钥响应:', response);
-                        message.success('删除API密钥成功');
-                        fetchApiKeys();
-                    } catch (error) {
-                        console.error('删除API密钥失败:', error);
-                        message.error('删除API密钥失败，请稍后重试');
-                    }
-                })();
-            } catch (error) {
-                console.error('执行删除时出错:', error);
-            }
-        } else {
-            console.log('用户取消删除');
+    const confirmDelete = async () => {
+        if (deleteId === null) return;
+
+        try {
+            console.log('执行删除操作，ID:', deleteId);
+            const response = await keysApi.deleteApiKey(deleteId);
+            console.log('删除API密钥响应:', response);
+            message.success('删除API密钥成功');
+            fetchApiKeys();
+        } catch (error) {
+            console.error('删除API密钥失败:', error);
+            message.error('删除API密钥失败，请稍后重试');
+        } finally {
+            setDeleteConfirmVisible(false);
+            setDeleteId(null);
+            setDeleteName('');
         }
     };
 
-    const handleResetUsage = (id: number) => {
-        console.log('重置API密钥使用次数按钮被点击，ID:', id);
+    const handleResetUsage = (id: number, name: string) => {
+        console.log('重置API密钥使用次数按钮被点击，ID:', id, '名称:', name);
+        setResetId(id);
+        setResetName(name);
+        setResetConfirmVisible(true);
+    };
 
-        // 使用原生confirm，避免antd Modal可能的问题
-        if (window.confirm('确定要重置这个API密钥的使用次数吗？')) {
-            console.log('用户确认重置');
-            try {
-                // 使用立即执行的异步函数
-                (async () => {
-                    try {
-                        console.log('执行重置操作，ID:', id);
-                        const response = await keysApi.resetApiKeyUsage(id);
-                        console.log('重置API密钥使用次数响应:', response);
-                        message.success('重置API密钥使用次数成功');
-                        fetchApiKeys();
-                    } catch (error) {
-                        console.error('重置API密钥使用次数失败:', error);
-                        message.error('重置API密钥使用次数失败，请稍后重试');
-                    }
-                })();
-            } catch (error) {
-                console.error('执行重置时出错:', error);
-            }
-        } else {
-            console.log('用户取消重置');
+    const confirmReset = async () => {
+        if (resetId === null) return;
+
+        try {
+            console.log('执行重置操作，ID:', resetId);
+            const response = await keysApi.resetApiKeyUsage(resetId);
+            console.log('重置API密钥使用次数响应:', response);
+            message.success('重置API密钥使用次数成功');
+            fetchApiKeys();
+        } catch (error) {
+            console.error('重置API密钥使用次数失败:', error);
+            message.error('重置API密钥使用次数失败，请稍后重试');
+        } finally {
+            setResetConfirmVisible(false);
+            setResetId(null);
+            setResetName('');
         }
     };
 
@@ -242,7 +248,7 @@ const ApiKeyList = () => {
                         size="small"
                         onClick={() => {
                             console.log('点击重置按钮');
-                            handleResetUsage(record.id);
+                            handleResetUsage(record.id, record.name);
                         }}
                     >
                         重置使用次数
@@ -254,7 +260,7 @@ const ApiKeyList = () => {
                         size="small"
                         onClick={() => {
                             console.log('点击删除按钮');
-                            handleDelete(record.id);
+                            handleDelete(record.id, record.name);
                         }}
                     >
                         删除
@@ -347,6 +353,48 @@ const ApiKeyList = () => {
                         )}
                     </Form>
                 )}
+            </Modal>
+
+            <Modal
+                title={
+                    <div style={{ display: 'flex', alignItems: 'center' }}>
+                        <ExclamationCircleFilled style={{ color: '#ff4d4f', marginRight: 8 }} />
+                        <span>确认删除</span>
+                    </div>
+                }
+                open={deleteConfirmVisible}
+                onOk={confirmDelete}
+                onCancel={() => setDeleteConfirmVisible(false)}
+                okText="确认删除"
+                cancelText="取消"
+                okButtonProps={{ danger: true }}
+            >
+                <div style={{ padding: '20px 0' }}>
+                    <p>您确定要删除以下API密钥吗？</p>
+                    <p style={{ fontWeight: 'bold', margin: '10px 0' }}>{deleteName}</p>
+                    <p style={{ color: '#ff4d4f' }}>警告：此操作不可恢复，删除后数据将永久丢失！</p>
+                </div>
+            </Modal>
+
+            <Modal
+                title={
+                    <div style={{ display: 'flex', alignItems: 'center' }}>
+                        <ExclamationCircleFilled style={{ color: '#1890ff', marginRight: 8 }} />
+                        <span>确认重置</span>
+                    </div>
+                }
+                open={resetConfirmVisible}
+                onOk={confirmReset}
+                onCancel={() => setResetConfirmVisible(false)}
+                okText="确认重置"
+                cancelText="取消"
+                okButtonProps={{ type: 'primary' }}
+            >
+                <div style={{ padding: '20px 0' }}>
+                    <p>您确定要重置以下API密钥的使用次数吗？</p>
+                    <p style={{ fontWeight: 'bold', margin: '10px 0' }}>{resetName}</p>
+                    <p>重置后，该密钥的当前使用次数将归零。</p>
+                </div>
             </Modal>
         </div>
     )
