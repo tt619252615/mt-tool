@@ -102,6 +102,7 @@ const ApiKeyList = () => {
                     is_active: values.is_active,
                 })
                 message.success('更新API密钥成功')
+                setIsModalVisible(false)
             } else {
                 // 创建API密钥
                 const params: CreateApiKeyParams = {
@@ -109,16 +110,40 @@ const ApiKeyList = () => {
                     description: values.description,
                     max_usage: values.max_usage,
                 }
-                const res = await keysApi.createApiKey(params)
-                if (res && res.data && res.data.key) {
-                    setNewApiKey(res.data.key)
-                    message.success('创建API密钥成功')
+
+                try {
+                    const res = await keysApi.createApiKey(params)
+                    console.log('创建API密钥响应:', res);
+
+                    // 检查响应数据结构，适应不同的返回格式
+                    let keyValue = '';
+                    if (res.data && res.data.key) {
+                        // 旧格式
+                        keyValue = res.data.key;
+                    } else if (res.data && res.data.data && res.data.data.key) {
+                        // 新格式，data可能嵌套在data中
+                        keyValue = res.data.data.key;
+                    } else if (typeof res.data === 'string') {
+                        // 可能直接返回字符串
+                        keyValue = res.data;
+                    } else {
+                        console.warn('无法从响应中获取密钥:', res);
+                        message.warning('创建成功但无法获取密钥，请联系管理员');
+                    }
+
+                    if (keyValue) {
+                        setNewApiKey(keyValue);
+                        message.success('创建API密钥成功，请保存好您的密钥');
+                    } else {
+                        setIsModalVisible(false);
+                    }
+                } catch (error) {
+                    console.error('创建API密钥失败:', error);
+                    message.error('创建API密钥失败');
+                    setIsModalVisible(false);
                 }
             }
 
-            if (!newApiKey) {
-                setIsModalVisible(false)
-            }
             fetchApiKeys()
         } catch (error) {
             console.error('操作失败:', error)
@@ -194,6 +219,33 @@ const ApiKeyList = () => {
             title: '名称',
             dataIndex: 'name',
             key: 'name',
+        },
+        {
+            title: '密钥',
+            dataIndex: 'key',
+            key: 'key',
+            render: (text: string) => (
+                <div style={{ display: 'flex', alignItems: 'center' }}>
+                    <div style={{
+                        maxWidth: '200px',
+                        overflow: 'hidden',
+                        textOverflow: 'ellipsis',
+                        whiteSpace: 'nowrap',
+                        marginRight: '8px'
+                    }}>
+                        {text ? (text.substring(0, 8) + '...' + text.substring(text.length - 8)) : ''}
+                    </div>
+                    <Button
+                        type="text"
+                        icon={<CopyOutlined />}
+                        onClick={(e) => {
+                            e.stopPropagation();
+                            copyToClipboard(text);
+                        }}
+                        title="复制完整密钥"
+                    />
+                </div>
+            ),
         },
         {
             title: '描述',
@@ -296,20 +348,58 @@ const ApiKeyList = () => {
                 onOk={handleOk}
                 onCancel={() => setIsModalVisible(false)}
                 footer={newApiKey ? [
-                    <Button key="copy" type="primary" icon={<CopyOutlined />} onClick={() => copyToClipboard(newApiKey)}>
-                        复制密钥
-                    </Button>,
-                    <Button key="close" onClick={() => setIsModalVisible(false)}>
+                    <Button key="close" onClick={() => {
+                        setIsModalVisible(false);
+                        setNewApiKey('');
+                    }}>
                         关闭
                     </Button>
                 ] : undefined}
+                width={newApiKey ? 600 : 520}
             >
                 {newApiKey ? (
-                    <div>
-                        <p>请保存好您的API密钥，它不会再次显示：</p>
-                        <Text copyable code style={{ wordBreak: 'break-all' }}>
-                            {newApiKey}
-                        </Text>
+                    <div style={{ padding: '20px 0' }}>
+                        <h3 style={{ color: '#1890ff', marginBottom: '15px' }}>API密钥创建成功</h3>
+                        <p style={{ fontWeight: 'bold', color: '#ff4d4f' }}>重要提示：请立即保存您的API密钥，它不会再次显示！</p>
+                        <div style={{
+                            margin: '20px 0',
+                            padding: '15px',
+                            background: '#f5f5f5',
+                            border: '1px solid #d9d9d9',
+                            borderRadius: '4px',
+                            position: 'relative'
+                        }}>
+                            <Text code style={{
+                                fontSize: '16px',
+                                wordBreak: 'break-all',
+                                color: '#333',
+                                display: 'block',
+                                width: '100%'
+                            }}>
+                                {newApiKey}
+                            </Text>
+                            <Button
+                                type="primary"
+                                icon={<CopyOutlined />}
+                                style={{
+                                    position: 'absolute',
+                                    top: '8px',
+                                    right: '8px',
+                                    zIndex: 1
+                                }}
+                                onClick={() => copyToClipboard(newApiKey)}
+                            >
+                                复制密钥
+                            </Button>
+                        </div>
+                        <div style={{ color: '#1890ff', marginTop: '20px' }}>
+                            <p>使用说明：</p>
+                            <ul>
+                                <li>该密钥用于API调用认证</li>
+                                <li>请妥善保管，不要泄露给未授权人员</li>
+                                <li>如果密钥泄露，请立即重新生成</li>
+                            </ul>
+                        </div>
                     </div>
                 ) : (
                     <Form
