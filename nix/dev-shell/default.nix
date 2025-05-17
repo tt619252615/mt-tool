@@ -13,6 +13,18 @@ let
       # tqdm
       # pytz
       # pydantic
+      fastapi
+      pydantic
+      uvicorn
+      sqlalchemy
+      python-jose
+      mysqlclient
+      passlib
+      python-multipart
+      loguru
+      requests
+      pydantic-settings
+      pymysql
 
       # Dev only packages
       yapf
