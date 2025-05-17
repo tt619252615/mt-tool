@@ -95,30 +95,29 @@ const UserList = () => {
     const handleDelete = (id: number) => {
         console.log('删除按钮被点击，ID:', id);
 
-        // 直接使用Modal的静态方法，避免组件渲染问题
-        Modal.confirm({
-            title: '确认删除',
-            content: '确定要删除这个用户吗？此操作不可恢复。',
-            okText: '确认删除',
-            okType: 'danger',
-            cancelText: '取消',
-            maskClosable: true, // 允许点击蒙层关闭
-            onOk: async () => {
-                try {
-                    console.log('确认删除，执行删除操作，ID:', id);
-                    const response = await userApi.deleteUser(id);
-                    console.log('删除用户响应:', response);
-                    message.success('删除用户成功');
-                    fetchUsers();
-                } catch (error) {
-                    console.error('删除用户失败:', error);
-                    message.error('删除用户失败，请稍后重试');
-                }
-            },
-            onCancel: () => {
-                console.log('取消删除用户');
+        // 使用原生confirm，避免antd Modal可能的问题
+        if (window.confirm('确定要删除这个用户吗？此操作不可恢复。')) {
+            console.log('用户确认删除');
+            try {
+                // 使用立即执行的异步函数
+                (async () => {
+                    try {
+                        console.log('执行删除操作，ID:', id);
+                        const response = await userApi.deleteUser(id);
+                        console.log('删除用户响应:', response);
+                        message.success('删除用户成功');
+                        fetchUsers();
+                    } catch (error) {
+                        console.error('删除用户失败:', error);
+                        message.error('删除用户失败，请稍后重试');
+                    }
+                })();
+            } catch (error) {
+                console.error('执行删除时出错:', error);
             }
-        });
+        } else {
+            console.log('用户取消删除');
+        }
     };
 
     const columns = [

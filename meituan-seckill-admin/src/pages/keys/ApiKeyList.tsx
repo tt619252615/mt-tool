@@ -119,59 +119,57 @@ const ApiKeyList = () => {
     const handleDelete = (id: number) => {
         console.log('删除API密钥按钮被点击，ID:', id);
 
-        // 直接使用Modal的静态方法，避免组件渲染问题
-        Modal.confirm({
-            title: '确认删除',
-            content: '确定要删除这个API密钥吗？此操作不可恢复。',
-            okText: '确认删除',
-            okType: 'danger',
-            cancelText: '取消',
-            maskClosable: true, // 允许点击蒙层关闭
-            onOk: async () => {
-                try {
-                    console.log('确认删除API密钥，执行删除操作，ID:', id);
-                    const response = await keysApi.deleteApiKey(id);
-                    console.log('删除API密钥响应:', response);
-                    message.success('删除API密钥成功');
-                    fetchApiKeys();
-                } catch (error) {
-                    console.error('删除API密钥失败:', error);
-                    message.error('删除API密钥失败，请稍后重试');
-                }
-            },
-            onCancel: () => {
-                console.log('取消删除API密钥');
+        // 使用原生confirm，避免antd Modal可能的问题
+        if (window.confirm('确定要删除这个API密钥吗？此操作不可恢复。')) {
+            console.log('用户确认删除');
+            try {
+                // 使用立即执行的异步函数
+                (async () => {
+                    try {
+                        console.log('执行删除操作，ID:', id);
+                        const response = await keysApi.deleteApiKey(id);
+                        console.log('删除API密钥响应:', response);
+                        message.success('删除API密钥成功');
+                        fetchApiKeys();
+                    } catch (error) {
+                        console.error('删除API密钥失败:', error);
+                        message.error('删除API密钥失败，请稍后重试');
+                    }
+                })();
+            } catch (error) {
+                console.error('执行删除时出错:', error);
             }
-        });
+        } else {
+            console.log('用户取消删除');
+        }
     };
 
     const handleResetUsage = (id: number) => {
         console.log('重置API密钥使用次数按钮被点击，ID:', id);
 
-        // 直接使用Modal的静态方法，避免组件渲染问题
-        Modal.confirm({
-            title: '确认重置',
-            content: '确定要重置这个API密钥的使用次数吗？',
-            okText: '确认重置',
-            okType: 'primary',
-            cancelText: '取消',
-            maskClosable: true, // 允许点击蒙层关闭
-            onOk: async () => {
-                try {
-                    console.log('确认重置API密钥使用次数，执行重置操作，ID:', id);
-                    const response = await keysApi.resetApiKeyUsage(id);
-                    console.log('重置API密钥使用次数响应:', response);
-                    message.success('重置API密钥使用次数成功');
-                    fetchApiKeys();
-                } catch (error) {
-                    console.error('重置API密钥使用次数失败:', error);
-                    message.error('重置API密钥使用次数失败，请稍后重试');
-                }
-            },
-            onCancel: () => {
-                console.log('取消重置API密钥使用次数');
+        // 使用原生confirm，避免antd Modal可能的问题
+        if (window.confirm('确定要重置这个API密钥的使用次数吗？')) {
+            console.log('用户确认重置');
+            try {
+                // 使用立即执行的异步函数
+                (async () => {
+                    try {
+                        console.log('执行重置操作，ID:', id);
+                        const response = await keysApi.resetApiKeyUsage(id);
+                        console.log('重置API密钥使用次数响应:', response);
+                        message.success('重置API密钥使用次数成功');
+                        fetchApiKeys();
+                    } catch (error) {
+                        console.error('重置API密钥使用次数失败:', error);
+                        message.error('重置API密钥使用次数失败，请稍后重试');
+                    }
+                })();
+            } catch (error) {
+                console.error('执行重置时出错:', error);
             }
-        });
+        } else {
+            console.log('用户取消重置');
+        }
     };
 
     const copyToClipboard = (text: string) => {

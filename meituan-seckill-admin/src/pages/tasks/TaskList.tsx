@@ -2,8 +2,10 @@ import { useState, useEffect } from 'react'
 import { Table, Button, Space, Tag, Modal, Form, Input, InputNumber, Switch, TimePicker, message } from 'antd'
 import { PlusOutlined, EditOutlined, DeleteOutlined, PlayCircleOutlined, PauseCircleOutlined } from '@ant-design/icons'
 import * as tasksApi from '../../api/tasks'
+import type { Task as ApiTask, CreateTaskParams as ApiCreateTaskParams, UpdateTaskParams as ApiUpdateTaskParams } from '../../api/tasks'
 import dayjs from 'dayjs'
 
+// 本地接口与后端API接口映射的适配层
 interface Task {
     id: number
     name: string
@@ -16,6 +18,46 @@ interface Task {
     created_at: string
     updated_at: string
 }
+
+// 将API返回的任务数据转换为本地格式
+const convertApiTaskToLocal = (apiTask: ApiTask): Task => {
+    return {
+        id: apiTask.id,
+        name: apiTask.title,
+        post_url: apiTask.seckill_url,
+        execution_time: apiTask.cron_expression || '00:00:00:000', // 使用cron表达式或默认值
+        frequency: apiTask.max_tries || 100,
+        requests_per_task: apiTask.current_tries || 3,
+        priority: apiTask.api_key_id || 1,
+        is_active: apiTask.status === 'running',
+        created_at: apiTask.created_at,
+        updated_at: apiTask.updated_at
+    };
+};
+
+// 将本地任务参数转换为API格式
+const convertLocalToApiCreateParams = (localParams: any): ApiCreateTaskParams => {
+    return {
+        title: localParams.name,
+        description: `Auto-generated from UI: ${localParams.name}`,
+        api_key_id: localParams.priority || 1,
+        cron_expression: localParams.execution_time,
+        max_tries: localParams.frequency || 100,
+        seckill_url: localParams.post_url
+    };
+};
+
+// 将本地任务更新参数转换为API格式
+const convertLocalToApiUpdateParams = (localParams: any): ApiUpdateTaskParams => {
+    return {
+        title: localParams.name,
+        description: `Updated from UI: ${localParams.name}`,
+        api_key_id: localParams.priority,
+        cron_expression: localParams.execution_time,
+        max_tries: localParams.frequency,
+        seckill_url: localParams.post_url
+    };
+};
 
 interface CreateTaskParams {
     name: string
@@ -52,8 +94,13 @@ const TaskList = () => {
         try {
             setLoading(true)
             const res = await tasksApi.getTaskList()
-            if (res && res.items) {
-                setTasks(res.items)
+            if (res && res.data && Array.isArray(res.data.items)) {
+                // 将API返回的任务数据转换为本地格式
+                const localTasks = res.data.items.map(convertApiTaskToLocal);
+                setTasks(localTasks)
+            } else {
+                console.warn('API返回格式不符合预期:', res);
+                setTasks([]);
             }
         } catch (error) {
             console.error('获取任务列表失败:', error)
@@ -121,18 +168,22 @@ const TaskList = () => {
 
             if (currentTask) {
                 // 更新抢券任务
-                await tasksApi.updateTask(currentTask.id, {
+                const localParams = {
                     name: values.name,
                     post_url: values.post_url,
                     execution_time: executionTime,
                     frequency: values.frequency,
                     requests_per_task: values.requests_per_task,
                     priority: values.priority,
-                })
+                };
+
+                // 转换为API格式
+                const apiParams = convertLocalToApiUpdateParams(localParams);
+                await tasksApi.updateTask(currentTask.id, apiParams);
                 message.success('更新抢券任务成功')
             } else {
                 // 创建抢券任务
-                const params: CreateTaskParams = {
+                const localParams: CreateTaskParams = {
                     name: values.name,
                     post_url: values.post_url,
                     execution_time: executionTime,
@@ -140,8 +191,11 @@ const TaskList = () => {
                     requests_per_task: values.requests_per_task,
                     priority: values.priority,
                     is_active: values.is_active,
-                }
-                await tasksApi.createTask(params)
+                };
+
+                // 转换为API格式
+                const apiParams = convertLocalToApiCreateParams(localParams);
+                await tasksApi.createTask(apiParams);
                 message.success('创建抢券任务成功')
             }
 
@@ -156,30 +210,29 @@ const TaskList = () => {
     const handleDelete = (id: number) => {
         console.log('删除任务按钮被点击，ID:', id);
 
-        // 直接使用Modal的静态方法，避免组件渲染问题
-        Modal.confirm({
-            title: '确认删除',
-            content: '确定要删除这个抢券任务吗？此操作不可恢复。',
-            okText: '确认删除',
-            okType: 'danger',
-            cancelText: '取消',
-            maskClosable: true, // 允许点击蒙层关闭
-            onOk: async () => {
-                try {
-                    console.log('确认删除任务，执行删除操作，ID:', id);
-                    const response = await tasksApi.deleteTask(id);
-                    console.log('删除任务响应:', response);
-                    message.success('删除抢券任务成功');
-                    fetchTasks();
-                } catch (error) {
-                    console.error('删除抢券任务失败:', error);
-                    message.error('删除抢券任务失败，请稍后重试');
-                }
-            },
-            onCancel: () => {
-                console.log('取消删除任务');
+        // 使用原生confirm，避免antd Modal可能的问题
+        if (window.confirm('确定要删除这个抢券任务吗？此操作不可恢复。')) {
+            console.log('用户确认删除');
+            try {
+                // 使用立即执行的异步函数
+                (async () => {
+                    try {
+                        console.log('执行删除操作，ID:', id);
+                        const response = await tasksApi.deleteTask(id);
+                        console.log('删除任务响应:', response);
+                        message.success('删除抢券任务成功');
+                        fetchTasks();
+                    } catch (error) {
+                        console.error('删除抢券任务失败:', error);
+                        message.error('删除抢券任务失败，请稍后重试');
+                    }
+                })();
+            } catch (error) {
+                console.error('执行删除时出错:', error);
             }
-        });
+        } else {
+            console.log('用户取消删除');
+        }
     };
 
     const handleToggleStatus = (record: Task) => {
@@ -188,31 +241,30 @@ const TaskList = () => {
 
         console.log(`${action}任务按钮被点击，ID:`, record.id, '当前状态:', record.is_active, '新状态:', newStatus);
 
-        // 直接使用Modal的静态方法，避免组件渲染问题
-        Modal.confirm({
-            title: `确认${action}`,
-            content: `确定要${action}这个抢券任务吗？`,
-            okText: `确认${action}`,
-            okType: newStatus ? 'primary' : 'danger',
-            cancelText: '取消',
-            maskClosable: true, // 允许点击蒙层关闭
-            onOk: async () => {
-                try {
-                    console.log(`确认${action}任务，执行${action}操作，ID:`, record.id);
-                    const status = newStatus ? 'running' : 'paused';
-                    const response = await tasksApi.updateTaskStatus(record.id, status);
-                    console.log(`${action}任务响应:`, response);
-                    message.success(`${action}抢券任务成功`);
-                    fetchTasks();
-                } catch (error) {
-                    console.error(`${action}抢券任务失败:`, error);
-                    message.error(`${action}抢券任务失败，请稍后重试`);
-                }
-            },
-            onCancel: () => {
-                console.log(`取消${action}任务`);
+        // 使用原生confirm，避免antd Modal可能的问题
+        if (window.confirm(`确定要${action}这个抢券任务吗？`)) {
+            console.log(`用户确认${action}`);
+            try {
+                // 使用立即执行的异步函数
+                (async () => {
+                    try {
+                        console.log(`执行${action}操作，ID:`, record.id);
+                        const status = newStatus ? 'running' : 'paused';
+                        const response = await tasksApi.updateTaskStatus(record.id, status);
+                        console.log(`${action}任务响应:`, response);
+                        message.success(`${action}抢券任务成功`);
+                        fetchTasks();
+                    } catch (error) {
+                        console.error(`${action}抢券任务失败:`, error);
+                        message.error(`${action}抢券任务失败，请稍后重试`);
+                    }
+                })();
+            } catch (error) {
+                console.error(`执行${action}时出错:`, error);
             }
-        });
+        } else {
+            console.log(`用户取消${action}`);
+        }
     };
 
     const columns = [
