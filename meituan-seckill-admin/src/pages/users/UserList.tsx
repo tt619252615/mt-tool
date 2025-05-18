@@ -34,8 +34,8 @@ const UserList = () => {
         try {
             setLoading(true)
             const res = await userApi.getUserList()
-            if (res && res.items) {
-                setUsers(res.items)
+            if (res && (res as any).items) {
+                setUsers((res as any).items)
             }
         } catch (error) {
             console.error('获取用户列表失败:', error)

@@ -1,4 +1,4 @@
-import api, { callApi } from './index'
+import { callApi } from './index'
 
 export interface User {
     id: number

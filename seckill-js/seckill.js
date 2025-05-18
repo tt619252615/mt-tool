@@ -2,7 +2,7 @@
 // 基本配置
 const BASE_GET_URL = 'https://promotion.waimai.meituan.com/lottery/limitcouponcomponent/info?couponReferIds=';
 // 设置API服务器地址
-const API_SERVER_URL = 'http://localhost:8000';  // 根据实际情况修改为你的API服务器地址
+const API_SERVER_URL = 'http://192.168.31.186:8000';  //  需要https服务
 let taskConfigs = [];
 let currentStatus = '未启动';
 let logMessages = [];
@@ -25,25 +25,56 @@ const httpClient = {
     async get(url, options = {}) {
         const fetchOptions = {
             method: 'GET',
-            headers: options.headers || {}
+            headers: options.headers || {},
+            // 增加跨域相关设置
+            mode: 'cors',
+            credentials: 'omit' // 不发送cookies，避免某些CORS问题
         };
 
         try {
-            const response = await fetch(url, fetchOptions);
+            addLog(`📡 发送GET请求: ${url.substring(0, 50)}...`, false, false, true);
+
+            // 添加超时处理
+            const timeoutPromise = new Promise((_, reject) =>
+                setTimeout(() => reject(new Error('请求超时')), 15000));
+
+            // 竞争超时和实际请求
+            const response = await Promise.race([
+                fetch(url, fetchOptions),
+                timeoutPromise
+            ]);
+
             if (!response.ok) {
-                const errorData = await response.json().catch(() => ({}));
+                const errorText = await response.text().catch(() => '无错误详情');
                 throw {
                     response: {
                         status: response.status,
-                        data: errorData
+                        data: { detail: errorText }
                     },
                     message: `请求失败: ${response.status} ${response.statusText}`
                 };
             }
-            return { data: await response.json(), status: response.status };
+
+            // 解析JSON响应
+            try {
+                const data = await response.json();
+                return { data, status: response.status };
+            } catch (jsonError) {
+                throw {
+                    message: `无法解析响应数据: ${jsonError.message}`,
+                    originalResponse: await response.text().catch(() => '无法获取原始响应')
+                };
+            }
         } catch (error) {
+            // 详细记录错误
+            console.error('GET请求详细错误:', error);
+
+            // 更友好的错误信息
+            const errorMessage = getDetailedErrorMessage(error);
+            addLog(`⚠️ 请求失败详情: ${errorMessage}`, false, true);
+
             if (!error.response) {
-                error.response = { data: { detail: error.message } };
+                error.response = { data: { detail: error.message || '网络请求失败' } };
             }
             throw error;
         }
@@ -56,30 +87,94 @@ const httpClient = {
                 'Content-Type': 'application/json',
                 ...options.headers
             },
-            body: JSON.stringify(data)
+            body: JSON.stringify(data),
+            // 增加跨域相关设置
+            mode: 'cors',
+            credentials: 'omit'
         };
 
         try {
-            const response = await fetch(url, fetchOptions);
+            addLog(`📡 发送POST请求: ${url.substring(0, 50)}...`, false, false, true);
+
+            // 添加超时处理
+            const timeoutPromise = new Promise((_, reject) =>
+                setTimeout(() => reject(new Error('请求超时')), 15000));
+
+            // 竞争超时和实际请求
+            const response = await Promise.race([
+                fetch(url, fetchOptions),
+                timeoutPromise
+            ]);
+
             if (!response.ok) {
-                const errorData = await response.json().catch(() => ({}));
+                const errorText = await response.text().catch(() => '无错误详情');
                 throw {
                     response: {
                         status: response.status,
-                        data: errorData
+                        data: { detail: errorText }
                     },
                     message: `请求失败: ${response.status} ${response.statusText}`
                 };
             }
-            return { data: await response.json(), status: response.status };
+
+            // 解析JSON响应
+            try {
+                const data = await response.json();
+                return { data, status: response.status };
+            } catch (jsonError) {
+                throw {
+                    message: `无法解析响应数据: ${jsonError.message}`,
+                    originalResponse: await response.text().catch(() => '无法获取原始响应')
+                };
+            }
         } catch (error) {
+            // 详细记录错误
+            console.error('POST请求详细错误:', error);
+
+            // 更友好的错误信息
+            const errorMessage = getDetailedErrorMessage(error);
+            addLog(`⚠️ 请求失败详情: ${errorMessage}`, false, true);
+
             if (!error.response) {
-                error.response = { data: { detail: error.message } };
+                error.response = { data: { detail: error.message || '网络请求失败' } };
             }
             throw error;
         }
     }
 };
+
+// 辅助函数：获取详细错误信息
+function getDetailedErrorMessage(error) {
+    if (error.name === 'TypeError' && error.message.includes('Failed to fetch')) {
+        return '网络请求失败，可能是跨域问题或服务器不可达';
+    }
+
+    if (error.name === 'AbortError') {
+        return '请求被中止';
+    }
+
+    if (error.message === '请求超时') {
+        return '请求超时，服务器响应时间过长';
+    }
+
+    if (error.response) {
+        if (error.response.status === 401 || error.response.status === 403) {
+            return 'API密钥无效或权限不足';
+        }
+
+        if (error.response.status === 404) {
+            return 'API端点不存在';
+        }
+
+        if (error.response.status >= 500) {
+            return '服务器内部错误，请稍后重试';
+        }
+
+        return `HTTP错误 ${error.response.status}: ${error.response.data?.detail || '未知错误'}`;
+    }
+
+    return error.message || '未知错误';
+}
 
 // 从 postUrl 提取 couponReferId
 function extractCouponReferId(postUrl) {
@@ -1420,6 +1515,22 @@ function initUI() {
 
     // 设置拖动功能
     makeDraggable(container);
+
+    // 在API密钥输入区域后添加API服务器地址设置
+    const apiKeySection = document.querySelector('.section:nth-child(1)');
+    if (apiKeySection) {
+        const apiServerSettingDiv = document.createElement('div');
+        apiServerSettingDiv.className = 'api-server-setting';
+        apiServerSettingDiv.innerHTML = `
+            <div class="input-container">
+                <input type="text" id="api-server-input" placeholder="API服务器地址" value="${API_SERVER_URL}">
+            </div>
+            <div class="api-server-actions">
+                <button id="save-api-server-btn" class="small-btn">保存服务器地址</button>
+            </div>
+        `;
+        apiKeySection.appendChild(apiServerSettingDiv);
+    }
 }
 
 // 实现拖动功能
@@ -1668,8 +1779,43 @@ function bindEvents() {
         autoSyncCheckbox.checked = advancedConfig.autoSyncTasks;
     }
 
-    // 以下保留原有事件绑定代码
-    // ... 保留原有事件绑定代码 ...
+    // API服务器地址保存按钮
+    const saveApiServerBtn = document.getElementById('save-api-server-btn');
+    const apiServerInput = document.getElementById('api-server-input');
+
+    if (saveApiServerBtn && apiServerInput) {
+        // 从本地存储加载之前保存的服务器地址
+        const savedApiServer = localStorage.getItem('seckill_api_server');
+        if (savedApiServer) {
+            API_SERVER_URL = savedApiServer;
+            apiServerInput.value = savedApiServer;
+            addLog(`ℹ️ 已从本地加载API服务器地址: ${savedApiServer}`, false, false, true);
+        }
+
+        saveApiServerBtn.addEventListener('click', () => {
+            const newApiServer = apiServerInput.value.trim();
+            if (!newApiServer) {
+                addLog('❌ API服务器地址不能为空', false, true);
+                return;
+            }
+
+            // 验证URL格式
+            try {
+                new URL(newApiServer);
+            } catch (e) {
+                addLog('❌ 无效的URL格式', false, true);
+                return;
+            }
+
+            API_SERVER_URL = newApiServer;
+            localStorage.setItem('seckill_api_server', newApiServer);
+            addLog(`✅ API服务器地址已保存: ${newApiServer}`, true);
+
+            // 重置验证缓存，因为服务器变了
+            lastVerifiedKey = '';
+            lastVerifiedTime = 0;
+        });
+    }
 }
 
 // 定时同步任务
@@ -1806,83 +1952,287 @@ async function fetchRemoteTasks() {
 
     addLog('🔄 正在从远程服务器获取任务配置...', false, false, true);
 
+    // 添加API端点测试逻辑
     try {
-        const response = await httpClient.get(`${API_SERVER_URL}/api/tasks/`, {
-            headers: {
-                'Authorization': `Bearer ${apiKey}`
-            }
-        });
+        // 首先测试API服务器连通性
+        const testUrl = `${API_SERVER_URL}/api/health`;
+        try {
+            await fetch(testUrl, {
+                method: 'GET',
+                mode: 'cors',
+                credentials: 'omit',
+                timeout: 5000,
+                headers: { 'Accept': 'application/json' }
+            });
+            addLog('✅ API服务器连接正常', false, false, true);
+        } catch (healthError) {
+            addLog(`⚠️ API服务器连接测试失败，将继续尝试: ${healthError.message}`, false, false, true);
+            // 不中断操作，继续尝试
+        }
 
-        if (response.data && Array.isArray(response.data.items)) {
-            const remoteTasks = response.data.items;
+        // 使用备用直接URL构建方式，避免可能的URL对象兼容问题
+        const apiUrl = API_SERVER_URL + '/api/tasks/api/active';
+        addLog(`🔗 请求URL: ${apiUrl}`, false, false, true);
 
-            if (remoteTasks.length === 0) {
-                addLog('ℹ️ 远程服务器没有可用的任务配置', false, false, true);
-                return false;
-            }
-
-            // 将远程任务转换为本地任务格式
-            const newTasks = remoteTasks.filter(task => task.is_active).map(task => {
-                // 解析时间字符串
-                const timeMatch = task.execution_time.match(/(\d{2}):(\d{2})(?::(\d{2}))?/);
-                let timeStr = task.execution_time;
-
-                if (timeMatch) {
-                    const hours = timeMatch[1];
-                    const minutes = timeMatch[2];
-                    const seconds = timeMatch[3] || '00';
-                    timeStr = `${hours}:${minutes}:${seconds}:000`;
+        // 尝试不同的请求方式
+        let response;
+        try {
+            response = await httpClient.get(apiUrl, {
+                headers: {
+                    'Authorization': `Bearer ${apiKey}`,
+                    'Accept': 'application/json',
+                    'X-Requested-With': 'XMLHttpRequest' // 某些服务器需要这个来识别Ajax请求
                 }
+            });
+        } catch (firstError) {
+            addLog(`⚠️ 第一次请求失败: ${firstError.message}，尝试备用方法...`, false, false, true);
 
-                return {
-                    name: task.name,
-                    time: timeStr,
-                    postUrl: task.post_url,
-                    frequency: task.frequency || 100,
-                    requestsPerTask: task.requests_per_task || advancedConfig.requestsPerTask,
-                    priority: task.priority || 0,
-                    running: false
-                };
+            // 尝试使用原生fetch作为备份方案
+            const rawResponse = await fetch(apiUrl, {
+                method: 'GET',
+                headers: {
+                    'Authorization': `Bearer ${apiKey}`,
+                    'Accept': 'application/json'
+                },
+                mode: 'cors',
+                credentials: 'omit'
             });
 
-            // 根据优先级排序
-            newTasks.sort((a, b) => b.priority - a.priority);
+            if (!rawResponse.ok) {
+                throw new Error(`HTTP错误 ${rawResponse.status}`);
+            }
 
-            // 清空当前任务列表并用远程任务替换
-            taskConfigs = newTasks;
-            updateTasksList();
+            const data = await rawResponse.json();
+            response = { data, status: rawResponse.status };
+        }
 
-            addLog(`✅ 已从远程加载 ${newTasks.length} 个任务`, true);
-            return true;
-        } else {
-            addLog('❌ 远程任务数据格式不正确', false, true);
+        console.log('API响应完整数据:', response);
+
+        // 适配新的API响应格式
+        let tasksData = response.data;
+
+        // 检查返回的格式，包括更详细的日志
+        if (!tasksData) {
+            addLog('❌ API返回空数据', false, true);
             return false;
         }
+
+        console.log('解析前的原始数据:', JSON.stringify(tasksData).substring(0, 200) + '...');
+
+        // 检查返回的格式是否是完整的响应格式
+        if (Array.isArray(tasksData)) {
+            // 直接返回了任务数组
+            addLog(`🔍 检测到API直接返回了任务数组，包含 ${tasksData.length} 个任务`, false, false, true);
+        } else if (tasksData.items && Array.isArray(tasksData.items)) {
+            // 返回了带items的格式 {items: [...], total: x, page: y, size: z}
+            addLog(`🔍 检测到API返回了带分页的任务列表，包含 ${tasksData.items.length} 个任务`, false, false, true);
+            tasksData = tasksData.items;
+        } else if (tasksData.data) {
+            // 数据可能嵌套在data字段中
+            addLog(`🔍 检测到数据在data字段中`, false, false, true);
+            if (Array.isArray(tasksData.data)) {
+                addLog(`🔍 检测到任务数组在data字段中，包含 ${tasksData.data.length} 个任务`, false, false, true);
+                tasksData = tasksData.data;
+            } else if (tasksData.data.items && Array.isArray(tasksData.data.items)) {
+                addLog(`🔍 检测到任务数组在data.items中，包含 ${tasksData.data.items.length} 个任务`, false, false, true);
+                tasksData = tasksData.data.items;
+            } else {
+                // 尝试更通用的解析方式
+                addLog(`⚠️ data字段中未找到标准任务数组，尝试智能解析...`, false, false, true);
+                const possibleArrays = findArraysInObject(tasksData);
+                if (possibleArrays.length > 0) {
+                    // 使用找到的第一个数组
+                    addLog(`🔍 找到可能的任务数组，包含 ${possibleArrays[0].length} 个项目`, false, false, true);
+                    tasksData = possibleArrays[0];
+                } else {
+                    addLog('❌ 未找到有效的任务数组', false, true);
+                    return false;
+                }
+            }
+        } else {
+            // 尝试通用方法找出任何数组
+            addLog(`⚠️ 未识别的任务数据格式，尝试智能解析...`, false, false, true);
+            const possibleArrays = findArraysInObject(tasksData);
+            if (possibleArrays.length > 0) {
+                // 使用找到的第一个数组
+                addLog(`🔍 找到可能的任务数组，包含 ${possibleArrays[0].length} 个项目`, false, false, true);
+                tasksData = possibleArrays[0];
+            } else {
+                addLog('❌ 未识别的任务数据格式，无法解析', false, true);
+                console.error('未识别的响应格式:', response);
+                return false;
+            }
+        }
+
+        if (!Array.isArray(tasksData) || tasksData.length === 0) {
+            addLog('ℹ️ 远程服务器没有可用的任务配置', false, false, true);
+            return false;
+        }
+
+        // 打印第一个任务的示例，帮助调试
+        if (tasksData.length > 0) {
+            console.log('任务示例:', tasksData[0]);
+        }
+
+        // 将远程任务转换为本地任务格式
+        const newTasks = tasksData.filter(task => task.is_active !== false).map(task => {
+            // 解析时间字符串
+            const timeMatch = task.execution_time?.match(/(\d{2}):(\d{2})(?::(\d{2}))?(?::(\d{3}))?/);
+            let timeStr = task.execution_time || "00:00:00:000";
+
+            if (timeMatch) {
+                const hours = timeMatch[1];
+                const minutes = timeMatch[2];
+                const seconds = timeMatch[3] || '00';
+                const milliseconds = timeMatch[4] || '000';
+                timeStr = `${hours}:${minutes}:${seconds}:${milliseconds}`;
+            }
+
+            return {
+                name: task.name || '未命名任务',
+                time: timeStr,
+                postUrl: task.post_url || '',
+                frequency: task.frequency || 100,
+                requestsPerTask: task.requests_per_task || advancedConfig.requestsPerTask,
+                priority: task.priority || 0,
+                running: false
+            };
+        });
+
+        // 过滤掉无效的任务
+        const validTasks = newTasks.filter(task => task.postUrl && task.name);
+
+        if (validTasks.length < newTasks.length) {
+            addLog(`⚠️ 过滤掉了 ${newTasks.length - validTasks.length} 个无效任务`, false, false, true);
+        }
+
+        if (validTasks.length === 0) {
+            addLog('❌ 没有有效的任务配置', false, true);
+            return false;
+        }
+
+        // 根据优先级排序
+        validTasks.sort((a, b) => b.priority - a.priority);
+
+        // 清空当前任务列表并用远程任务替换
+        taskConfigs = validTasks;
+        updateTasksList();
+
+        addLog(`✅ 已从远程加载 ${validTasks.length} 个任务`, true);
+        return true;
     } catch (error) {
+        console.error('获取任务详细错误:', error);
         const errorMessage = error.response?.data?.detail || error.message || '未知错误';
         addLog(`❌ 获取远程任务失败: ${errorMessage}`, false, true);
         return false;
     }
 }
 
-// 验证API密钥有效性
-async function validateApiKey(key) {
-    try {
-        const response = await httpClient.get(`${API_SERVER_URL}/api/auth/me`, {
-            headers: {
-                'Authorization': `Bearer ${key}`
-            }
-        });
+// 辅助函数：递归查找对象中的数组
+function findArraysInObject(obj, minLength = 1) {
+    const arrays = [];
 
-        if (response.status === 200) {
-            const username = response.data.username || '未知用户';
-            addLog(`✅ API密钥验证成功, 用户: ${username}`, true);
+    function search(current) {
+        if (Array.isArray(current) && current.length >= minLength) {
+            arrays.push(current);
+            return;
+        }
+
+        if (current && typeof current === 'object') {
+            for (const key in current) {
+                search(current[key]);
+            }
+        }
+    }
+
+    search(obj);
+    return arrays;
+}
+
+// 验证API密钥有效性
+async function validateApiKey(key, forceValidate = false) {
+    // 如果密钥为空，直接返回失败
+    if (!key) {
+        addLog('❌ API密钥不能为空', false, true);
+        return false;
+    }
+
+    // 检查缓存
+    const now = Date.now();
+    if (!forceValidate && key === lastVerifiedKey && (now - lastVerifiedTime) < VERIFICATION_CACHE_TIME) {
+        addLog(`✅ 使用已验证的API密钥 (缓存有效)`, true);
+        return true;
+    }
+
+    addLog('🔄 正在验证API密钥...', false, false, true);
+
+    try {
+        // 尝试先用verify-key专用接口验证
+        let isValid = false;
+
+        try {
+            const apiUrl = `${API_SERVER_URL}/api/auth/verify-key`;
+            const response = await httpClient.get(apiUrl, {
+                headers: {
+                    'Authorization': `Bearer ${key}`,
+                    'Accept': 'application/json'
+                }
+            });
+
+            if (response.status === 200) {
+                const keyInfo = response.data;
+                const keyName = keyInfo.name || '未命名密钥';
+                const usageInfo = keyInfo.current_usage !== undefined ?
+                    `已使用 ${keyInfo.current_usage}/${keyInfo.max_usage === -1 ? '无限制' : keyInfo.max_usage}` : '';
+
+                addLog(`✅ API密钥验证成功! 密钥名称: ${keyName} ${usageInfo}`, true);
+                isValid = true;
+            }
+        } catch (firstAttemptError) {
+            console.log('第一次验证尝试失败，尝试备用方法', firstAttemptError);
+            addLog('⚠️ 主验证方法失败，尝试备用方法...', false, false, true);
+
+            // 备用方案：尝试获取任务来验证密钥
+            try {
+                const backupUrl = `${API_SERVER_URL}/api/tasks/api/active`;
+                const backupResponse = await httpClient.get(backupUrl, {
+                    headers: {
+                        'Authorization': `Bearer ${key}`,
+                        'Accept': 'application/json'
+                    }
+                });
+
+                if (backupResponse.status === 200) {
+                    addLog(`✅ API密钥验证成功 (通过任务接口)`, true);
+                    isValid = true;
+                }
+            } catch (secondAttemptError) {
+                console.log('备用验证也失败', secondAttemptError);
+                // 两次尝试都失败，密钥可能无效
+                isValid = false;
+            }
+        }
+
+        if (isValid) {
+            // 更新缓存
+            lastVerifiedKey = key;
+            lastVerifiedTime = now;
             return true;
         }
+
+        addLog(`❌ API密钥验证失败`, false, true);
         return false;
     } catch (error) {
-        const errorMessage = error.response?.data?.detail || error.message || '未知错误';
-        addLog(`❌ API密钥验证失败: ${errorMessage}`, false, true);
+        console.error('验证API密钥详细错误:', error);
+
+        // 如果服务器返回了401或403，则密钥无效
+        if (error.response && (error.response.status === 401 || error.response.status === 403)) {
+            addLog(`❌ API密钥无效或已被禁用`, false, true);
+        } else {
+            const errorMessage = error.response?.data?.detail || error.message || '未知错误';
+            addLog(`❌ API密钥验证失败: ${errorMessage}`, false, true);
+        }
+
         return false;
     }
 }

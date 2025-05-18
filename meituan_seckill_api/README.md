@@ -229,6 +229,92 @@ python tests/test_api.py
 - GET `/api/logs/by-key/{api_key_id}`: 获取特定API密钥的访问日志
 - GET `/api/logs/time-range`: 获取特定时间范围内的访问日志
 
+## API密钥使用指南
+
+### 直接使用API密钥访问任务（无需登录）
+
+系统设计允许客户端应用程序使用API密钥直接访问任务，无需用户登录。这对于第三方集成和自动化脚本特别有用。
+
+#### 1. 获取API密钥
+
+从管理员后台获取API密钥：
+1. 登录管理后台
+2. 进入"API密钥管理"页面
+3. 创建新密钥或使用现有密钥
+4. 复制密钥值（创建后只显示一次，请妥善保管）
+
+#### 2. 使用API密钥获取活跃任务
+
+**请求格式：**
+
+```
+GET /api/tasks/api/active
+Authorization: Bearer YOUR_API_KEY
+```
+
+**示例（Python）：**
+
+```python
+import requests
+
+def get_active_tasks(api_key, base_url="http://your-api-domain/api"):
+    headers = {
+        'Authorization': f'Bearer {api_key}',
+        'Content-Type': 'application/json'
+    }
+    
+    response = requests.get(f"{base_url}/tasks/api/active", headers=headers)
+    
+    if response.status_code != 200:
+        raise Exception(f"HTTP error {response.status_code}: {response.text}")
+    
+    return response.json()['data']
+```
+
+**示例（JavaScript）：**
+
+```javascript
+async function getActiveTasks(apiKey, baseUrl = "http://your-api-domain/api") {
+  const response = await fetch(`${baseUrl}/tasks/api/active`, {
+    method: 'GET',
+    headers: {
+      'Authorization': `Bearer ${apiKey}`,
+      'Content-Type': 'application/json'
+    }
+  });
+  
+  if (!response.ok) {
+    throw new Error(`HTTP error ${response.status}`);
+  }
+  
+  const data = await response.json();
+  return data.data;
+}
+```
+
+#### 3. 示例客户端
+
+我们提供了一个示例Python客户端，演示如何使用API密钥获取任务：
+
+```bash
+# 使用方法
+python tests/example_client.py --key YOUR_API_KEY --url http://your-api-domain/api
+
+# 默认使用localhost
+python tests/example_client.py --key YOUR_API_KEY
+```
+
+示例客户端将显示所有活跃任务的详细信息，包括抢购URL等。
+
+#### 4. 常见错误和解决方案
+
+| 错误码 | 描述 | 解决方案 |
+|-------|-----|---------|
+| 401 | 无效的API密钥 | 检查密钥是否正确，包括Bearer前缀 |
+| 403 | API密钥已禁用或使用次数超限 | 在管理后台检查密钥状态或重置次数 |
+| 404 | 端点不存在 | 确认API URL路径是否正确 |
+| 500 | 服务器内部错误 | 检查服务器日志或联系管理员 |
+
 ## 许可证
 
 [MIT](LICENSE) 

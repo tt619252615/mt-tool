@@ -4,7 +4,7 @@ import { Spin } from 'antd'
 import { AuthContext } from '../context/AuthContext'
 
 interface ProtectedRouteProps {
-    children: JSX.Element
+    children: React.ReactNode
 }
 
 const ProtectedRoute = ({ children }: ProtectedRouteProps) => {

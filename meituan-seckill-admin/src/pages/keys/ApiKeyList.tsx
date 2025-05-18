@@ -15,13 +15,13 @@ interface ApiKey {
     is_active: boolean
 }
 
-interface CreateApiKeyParams {
+export interface CreateApiKeyParams {
     name: string
     description: string
     max_usage: number
 }
 
-interface UpdateApiKeyParams {
+export interface UpdateApiKeyParams {
     name?: string
     description?: string
     max_usage?: number
@@ -52,13 +52,45 @@ const ApiKeyList = () => {
     const fetchApiKeys = async () => {
         try {
             setLoading(true)
+            console.log('开始获取API密钥列表...')
             const res = await keysApi.getApiKeyList()
-            if (res && res.items) {
-                setApiKeys(res.items)
+            console.log('获取到的API密钥数据原始响应:', res)
+
+            // 检查响应结构
+            if (!res) {
+                console.error('API返回空响应')
+                setApiKeys([])
+                setLoading(false)
+                return
+            }
+
+            // 获取数据 - 支持多种可能的响应格式
+            let responseData = res;
+
+            // 如果有data字段，可能是经过callApi包装后的格式
+            if (res.data) {
+                console.log('发现嵌套的data字段')
+                responseData = res.data;
+            }
+
+            console.log('处理后的响应数据:', responseData)
+
+            // 处理实际的API密钥数据
+            if ((responseData as any).items && Array.isArray((responseData as any).items)) {
+                console.log('找到items数组，长度为:', (responseData as any).items.length)
+                setApiKeys((responseData as any).items)
+            } else if (Array.isArray(responseData)) {
+                // 兼容直接返回数组的情况
+                console.log('API直接返回了数组:', responseData)
+                setApiKeys(responseData)
+            } else {
+                console.warn('API返回格式不符合预期:', responseData)
+                setApiKeys([])
             }
         } catch (error) {
             console.error('获取API密钥列表失败:', error)
             message.error('获取API密钥列表失败')
+            setApiKeys([])
         } finally {
             setLoading(false)
         }
@@ -103,9 +135,10 @@ const ApiKeyList = () => {
                 })
                 message.success('更新API密钥成功')
                 setIsModalVisible(false)
+                fetchApiKeys()
             } else {
                 // 创建API密钥
-                const params: CreateApiKeyParams = {
+                const params: keysApi.CreateApiKeyParams = {
                     name: values.name,
                     description: values.description,
                     max_usage: values.max_usage,
@@ -113,42 +146,72 @@ const ApiKeyList = () => {
 
                 try {
                     const res = await keysApi.createApiKey(params)
-                    console.log('创建API密钥响应:', res);
+                    console.log('创建API密钥响应:', res)
 
-                    // 检查响应数据结构，适应不同的返回格式
-                    let keyValue = '';
-                    if (res.data && res.data.key) {
-                        // 旧格式
-                        keyValue = res.data.key;
-                    } else if (res.data && res.data.data && res.data.data.key) {
-                        // 新格式，data可能嵌套在data中
-                        keyValue = res.data.data.key;
-                    } else if (typeof res.data === 'string') {
-                        // 可能直接返回字符串
-                        keyValue = res.data;
-                    } else {
-                        console.warn('无法从响应中获取密钥:', res);
-                        message.warning('创建成功但无法获取密钥，请联系管理员');
-                    }
+                    // 检查响应数据结构，提取API密钥
+                    let keyValue = extractKeyFromResponse(res)
 
                     if (keyValue) {
-                        setNewApiKey(keyValue);
-                        message.success('创建API密钥成功，请保存好您的密钥');
+                        setNewApiKey(keyValue)
+                        message.success('创建API密钥成功，请保存好您的密钥')
                     } else {
-                        setIsModalVisible(false);
+                        message.warning('创建成功但无法获取密钥，请联系管理员')
+                        setIsModalVisible(false)
                     }
+                    fetchApiKeys()
                 } catch (error) {
-                    console.error('创建API密钥失败:', error);
-                    message.error('创建API密钥失败');
-                    setIsModalVisible(false);
+                    console.error('创建API密钥失败:', error)
+                    message.error('创建API密钥失败')
+                    setIsModalVisible(false)
                 }
             }
-
-            fetchApiKeys()
         } catch (error) {
             console.error('操作失败:', error)
             message.error('操作失败')
         }
+    }
+
+    // 提取响应中的API密钥
+    const extractKeyFromResponse = (response: any): string => {
+        console.log('尝试从响应中提取密钥:', response)
+
+        // 尝试各种可能的路径
+        if (!response) return ''
+
+        // 直接在响应中
+        if (response.key) return response.key
+
+        // 在data字段中
+        if (response.data) {
+            // 直接在data中
+            if (response.data.key) return response.data.key
+
+            // 在data.data中
+            if (response.data.data && response.data.data.key) return response.data.data.key
+        }
+
+        // 响应可能直接是字符串
+        if (typeof response === 'string') return response
+
+        // 查找任意路径中的key字段
+        const findKeyInObject = (obj: any): string => {
+            if (!obj || typeof obj !== 'object') return ''
+
+            // 直接查找key字段
+            if (obj.key && typeof obj.key === 'string') return obj.key
+
+            // 递归搜索所有嵌套对象
+            for (const key in obj) {
+                if (typeof obj[key] === 'object') {
+                    const found = findKeyInObject(obj[key])
+                    if (found) return found
+                }
+            }
+
+            return ''
+        }
+
+        return findKeyInObject(response)
     }
 
     const handleDelete = (id: number, name: string) => {

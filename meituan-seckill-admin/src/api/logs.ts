@@ -1,4 +1,4 @@
-import api, { callApi } from './index'
+import { callApi } from './index'
 
 export interface Log {
     id: number
@@ -34,4 +34,19 @@ export const deleteLog = async (id: number) => {
 // 清空所有日志
 export const clearAllLogs = async () => {
     return callApi('delete', '/logs/clear-all')
+}
+
+// 获取最近日志
+export const getRecentLogs = async (hours: number = 24) => {
+    return callApi('get', '/logs/recent', { params: { hours } })
+}
+
+// 获取特定API密钥的日志
+export const getLogsByKey = async (keyId: number) => {
+    return callApi('get', '/logs/key', { params: { key_id: keyId } })
+}
+
+// 获取特定时间范围内的日志
+export const getLogsByTimeRange = async (startTime: string, endTime: string) => {
+    return callApi('get', '/logs/time-range', { params: { start_time: startTime, end_time: endTime } })
 } 

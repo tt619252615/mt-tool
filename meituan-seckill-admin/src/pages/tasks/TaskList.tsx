@@ -2,86 +2,10 @@ import { useState, useEffect } from 'react'
 import { Table, Button, Space, Tag, Modal, Form, Input, InputNumber, Switch, TimePicker, message } from 'antd'
 import { PlusOutlined, EditOutlined, DeleteOutlined, PlayCircleOutlined, PauseCircleOutlined, ExclamationCircleFilled } from '@ant-design/icons'
 import * as tasksApi from '../../api/tasks'
-import type { Task as ApiTask, CreateTaskParams as ApiCreateTaskParams, UpdateTaskParams as ApiUpdateTaskParams } from '../../api/tasks'
+import type { Task, CreateTaskParams, UpdateTaskParams, UpdateTaskStatusParams } from '../../api/tasks'
 import dayjs from 'dayjs'
 
-// 本地接口与后端API接口映射的适配层
-interface Task {
-    id: number
-    name: string
-    post_url: string
-    execution_time: string  // 格式: HH:MM:SS:SSS
-    frequency: number
-    requests_per_task: number
-    priority: number
-    is_active: boolean
-    created_at: string
-    updated_at: string
-}
-
-// 将API返回的任务数据转换为本地格式
-const convertApiTaskToLocal = (apiTask: ApiTask): Task => {
-    return {
-        id: apiTask.id,
-        name: apiTask.title,
-        post_url: apiTask.seckill_url,
-        execution_time: apiTask.cron_expression || '00:00:00:000', // 使用cron表达式或默认值
-        frequency: apiTask.max_tries || 100,
-        requests_per_task: apiTask.current_tries || 3,
-        priority: apiTask.api_key_id || 1,
-        is_active: apiTask.status === 'running',
-        created_at: apiTask.created_at,
-        updated_at: apiTask.updated_at
-    };
-};
-
-// 将本地任务参数转换为API格式
-const convertLocalToApiCreateParams = (localParams: any): ApiCreateTaskParams => {
-    return {
-        title: localParams.name,
-        description: `Auto-generated from UI: ${localParams.name}`,
-        api_key_id: localParams.priority || 1,
-        cron_expression: localParams.execution_time,
-        max_tries: localParams.frequency || 100,
-        seckill_url: localParams.post_url
-    };
-};
-
-// 将本地任务更新参数转换为API格式
-const convertLocalToApiUpdateParams = (localParams: any): ApiUpdateTaskParams => {
-    return {
-        title: localParams.name,
-        description: `Updated from UI: ${localParams.name}`,
-        api_key_id: localParams.priority,
-        cron_expression: localParams.execution_time,
-        max_tries: localParams.frequency,
-        seckill_url: localParams.post_url
-    };
-};
-
-interface CreateTaskParams {
-    name: string
-    post_url: string
-    execution_time: string  // 格式: HH:MM:SS:SSS
-    frequency: number
-    requests_per_task: number
-    priority: number
-    is_active: boolean
-}
-
-interface UpdateTaskParams {
-    name?: string
-    post_url?: string
-    execution_time?: string
-    frequency?: number
-    requests_per_task?: number
-    priority?: number
-}
-
-interface UpdateTaskStatusParams {
-    is_active: boolean
-}
-
+// 任务列表组件
 const TaskList = () => {
     const [tasks, setTasks] = useState<Task[]>([])
     const [loading, setLoading] = useState(false)
@@ -89,6 +13,12 @@ const TaskList = () => {
     const [form] = Form.useForm()
     const [currentTask, setCurrentTask] = useState<Task | null>(null)
     const [modalTitle, setModalTitle] = useState('创建抢券任务')
+    // 添加分页状态
+    const [pagination, setPagination] = useState({
+        current: 1,
+        pageSize: 10,
+        total: 0
+    })
 
     // 添加删除确认对话框相关状态
     const [deleteConfirmVisible, setDeleteConfirmVisible] = useState(false);
@@ -103,18 +33,75 @@ const TaskList = () => {
     const fetchTasks = async () => {
         try {
             setLoading(true)
+            console.log('开始获取任务列表...')
             const res = await tasksApi.getTaskList()
-            if (res && res.data && Array.isArray(res.data.items)) {
-                // 将API返回的任务数据转换为本地格式
-                const localTasks = res.data.items.map(convertApiTaskToLocal);
-                setTasks(localTasks)
+            console.log('获取到的任务数据原始响应:', res)
+
+            // 检查响应结构
+            if (!res) {
+                console.error('API返回空响应')
+                setTasks([])
+                setLoading(false)
+                return
+            }
+
+            // 获取数据 - 支持多种可能的响应格式
+            let responseData = res;
+
+            // 如果有data字段，可能是经过callApi包装后的格式
+            if (res.data) {
+                console.log('发现嵌套的data字段')
+                responseData = res.data;
+            }
+
+            console.log('处理后的响应数据:', responseData)
+
+            // 处理实际的任务数据
+            if ((responseData as any).items && Array.isArray((responseData as any).items)) {
+                console.log('找到items数组，长度为:', (responseData as any).items.length)
+
+                // 设置任务列表
+                setTasks((responseData as any).items)
+
+                // 更新分页信息
+                setPagination({
+                    current: (responseData as any).page || 1,
+                    pageSize: (responseData as any).size || 10,
+                    total: (responseData as any).total || 0
+                })
+
+                console.log('已设置任务列表和分页信息:', {
+                    tasks: (responseData as any).items,
+                    pagination: {
+                        current: (responseData as any).page || 1,
+                        pageSize: (responseData as any).size || 10,
+                        total: (responseData as any).total || 0
+                    }
+                })
+            } else if (Array.isArray(responseData)) {
+                // 兼容直接返回数组的情况
+                console.log('API直接返回了数组:', responseData)
+                setTasks(responseData)
             } else {
-                console.warn('API返回格式不符合预期:', res);
-                setTasks([]);
+                console.warn('API返回格式不符合预期，尝试提取可能的任务数据:', responseData)
+
+                // 尝试从响应中提取任何可能的任务数组
+                const possibleTasksArray = Object.values(responseData).find(value =>
+                    Array.isArray(value) && value.length > 0 && value[0].name !== undefined
+                )
+
+                if (Array.isArray(possibleTasksArray)) {
+                    console.log('找到可能的任务数组:', possibleTasksArray)
+                    setTasks(possibleTasksArray as Task[])
+                } else {
+                    console.error('无法从响应中提取任务数据')
+                    setTasks([])
+                }
             }
         } catch (error) {
             console.error('获取任务列表失败:', error)
             message.error('获取任务列表失败')
+            setTasks([])
         } finally {
             setLoading(false)
         }
@@ -178,22 +165,7 @@ const TaskList = () => {
 
             if (currentTask) {
                 // 更新抢券任务
-                const localParams = {
-                    name: values.name,
-                    post_url: values.post_url,
-                    execution_time: executionTime,
-                    frequency: values.frequency,
-                    requests_per_task: values.requests_per_task,
-                    priority: values.priority,
-                };
-
-                // 转换为API格式
-                const apiParams = convertLocalToApiUpdateParams(localParams);
-                await tasksApi.updateTask(currentTask.id, apiParams);
-                message.success('更新抢券任务成功')
-            } else {
-                // 创建抢券任务
-                const localParams: CreateTaskParams = {
+                const params: UpdateTaskParams = {
                     name: values.name,
                     post_url: values.post_url,
                     execution_time: executionTime,
@@ -203,9 +175,23 @@ const TaskList = () => {
                     is_active: values.is_active,
                 };
 
-                // 转换为API格式
-                const apiParams = convertLocalToApiCreateParams(localParams);
-                await tasksApi.createTask(apiParams);
+                const response = await tasksApi.updateTask(currentTask.id, params);
+                console.log('更新任务响应:', response);
+                message.success('更新抢券任务成功')
+            } else {
+                // 创建抢券任务
+                const params: CreateTaskParams = {
+                    name: values.name,
+                    post_url: values.post_url,
+                    execution_time: executionTime,
+                    frequency: values.frequency,
+                    requests_per_task: values.requests_per_task,
+                    priority: values.priority,
+                    is_active: values.is_active,
+                };
+
+                const response = await tasksApi.createTask(params);
+                console.log('创建任务响应:', response);
                 message.success('创建抢券任务成功')
             }
 
@@ -261,8 +247,10 @@ const TaskList = () => {
 
         try {
             console.log(`执行${action}操作，ID:`, toggleTask.id);
-            const status = newStatus ? 'running' : 'paused';
-            const response = await tasksApi.updateTaskStatus(toggleTask.id, status);
+            const params: UpdateTaskStatusParams = {
+                is_active: newStatus
+            };
+            const response = await tasksApi.updateTaskStatus(toggleTask.id, params);
             console.log(`${action}任务响应:`, response);
             message.success(`${action}抢券任务成功`);
             fetchTasks();
@@ -376,7 +364,23 @@ const TaskList = () => {
                 dataSource={tasks}
                 rowKey="id"
                 loading={loading}
-                pagination={{ pageSize: 10 }}
+                pagination={{
+                    current: pagination.current,
+                    pageSize: pagination.pageSize,
+                    total: pagination.total,
+                    showSizeChanger: true,
+                    showQuickJumper: true,
+                    showTotal: (total) => `共 ${total} 条数据`
+                }}
+                onChange={(pagination) => {
+                    console.log('分页变化:', pagination);
+                    setPagination({
+                        current: pagination.current || 1,
+                        pageSize: pagination.pageSize || 10,
+                        total: pagination.total || 0
+                    });
+                    // 这里可以添加按页获取数据的逻辑
+                }}
             />
 
             <Modal

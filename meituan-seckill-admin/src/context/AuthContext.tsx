@@ -1,4 +1,5 @@
-import { createContext, useState, useEffect, ReactNode } from 'react'
+import { createContext, useState, useEffect } from 'react'
+import type { ReactNode } from 'react'
 import { message } from 'antd'
 import { getCurrentUser } from '../api/user'
 
@@ -38,8 +39,8 @@ export const AuthProvider = ({ children }: AuthProviderProps) => {
         try {
             const userData = await getCurrentUser()
             // 确保userData有效
-            if (userData && userData.username) {
-                setUser(userData)
+            if (userData && userData.data && userData.data.username) {
+                setUser(userData.data)
                 setIsAuthenticated(true)
             } else {
                 console.error('获取用户信息失败: 无效的用户数据')
