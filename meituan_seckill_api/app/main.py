@@ -2,6 +2,10 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from app.routers import users, tasks, api_keys, auth, logs
 from app.core.config import settings
+from pathlib import Path
+import os
+from fastapi.staticfiles import StaticFiles
+from fastapi.responses import FileResponse
 
 app = FastAPI(
     title="美团秒杀管理系统",
@@ -18,6 +22,21 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+DEV_FRONTEND_PATH = Path(
+    os.getenv(
+        "CLOUD_TRACE_FRONTEND",
+        str(Path(__file__).parent.parent.parent / "meituan-seckill-admin" / "dist"),
+    )
+)
+app.mount("/assets", StaticFiles(directory=DEV_FRONTEND_PATH / "assets", html=True))
+
+@app.get("/cloudtrace.svg")
+async def serve_icon():
+    return FileResponse(DEV_FRONTEND_PATH / "vite.svg")
+
+@app.get("/")
+async def serve_ui():
+    return FileResponse(DEV_FRONTEND_PATH / "index.html")
 # 包含路由
 app.include_router(auth.router, prefix="/api/auth", tags=["认证"])
 app.include_router(users.router, prefix="/api/users", tags=["用户"])

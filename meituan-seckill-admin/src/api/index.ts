@@ -30,6 +30,8 @@ api.interceptors.response.use(
     (response) => {
         // 输出API响应信息用于调试
         console.log('API响应成功:', response.config.method?.toUpperCase(), response.config.url, response.status)
+        console.log('API响应数据:', JSON.stringify(response.data).substring(0, 200) + '...')
+
         // 直接返回响应数据
         return response.data
     },
@@ -69,7 +71,7 @@ api.interceptors.response.use(
 
 // 重新定义callApi函数，添加更详细的日志和错误处理
 export const callApi = async (method: string, url: string, data?: any, config?: any) => {
-    console.log(`[API调用] ${method.toUpperCase()} ${url}`, data ? `数据: ${JSON.stringify(data)}` : '');
+    console.log(`[API调用] ${method.toUpperCase()} ${url}`, data ? `数据: ${JSON.stringify(data).substring(0, 200)}` : '');
 
     try {
         let response;
@@ -94,29 +96,10 @@ export const callApi = async (method: string, url: string, data?: any, config?: 
                 throw new Error(`不支持的HTTP方法: ${method}`);
         }
 
-        console.log(`[API响应] ${method.toUpperCase()} ${url} 状态码: ${response.status}`);
+        console.log(`[API响应] ${method.toUpperCase()} ${url} 完整响应:`, JSON.stringify(response).substring(0, 200));
 
-        // 处理响应统一格式
-        if (response && typeof response === 'object') {
-            // 适配API响应: 将直接返回的数据包装成预期的格式
-            const responseObj = response as any; // 使用any类型处理动态属性
-            if (!responseObj.data && (
-                responseObj.items !== undefined ||
-                responseObj.total !== undefined ||
-                responseObj.page !== undefined
-            )) {
-                console.log(`[API适配] ${method.toUpperCase()} ${url} 响应格式调整: 添加data字段`);
-                // 创建统一的响应格式
-                const adaptedResponse = {
-                    data: responseObj
-                };
-                return adaptedResponse;
-            }
-            return response;
-        } else {
-            console.error(`[API错误] ${method.toUpperCase()} ${url} 响应不是对象:`, response);
-            throw new Error('API响应格式错误');
-        }
+        // 不要修改原始响应，直接返回
+        return response;
     } catch (error: any) {
         console.error(`[API错误] ${method.toUpperCase()} ${url}`, error);
 

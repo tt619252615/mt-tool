@@ -1,28 +1,28 @@
 {
-  description = ''
-    A collection of data pipeline modules implemented in python.
-  '';
+  description = "My awesome python project";
 
   inputs = {
     nixpkgs.url = "github:NixOS/nixpkgs/nixos-24.11";
-
-    utils.url = "github:numtide/flake-utils";
+    flake-parts.url = "github:hercules-ci/flake-parts";
+    flake-parts.inputs.nixpkgs-lib.follows = "nixpkgs";
   };
 
-  outputs = { self, nixpkgs, ... }@inputs:
-    {
-      overlays.dev = nixpkgs.lib.composeManyExtensions [ ];
+  outputs = { self, flake-parts, nixpkgs, ... }@inputs:
+    let
+      # 为了向后兼容，同时导出常规的 flake-parts 结果和旧式的 devShell
+      flakeOutputs = flake-parts.lib.mkFlake { inherit inputs; } {
+        systems = [ "aarch64-linux" "aarch64-darwin" "x86_64-linux" ];
+        imports = [ ./nix/dev-shell/default.nix ./nix/exported.nix ];
+      };
 
-    } // inputs.utils.lib.eachSystem ["aarch64-linux" ] (system:
-      let
-        pkgs = import nixpkgs {
-          inherit system;
-          config = { allowUnfree = true; };
-          overlays = [ self.overlays.dev ];
-        };
-
-      in {
-        devShells.default = pkgs.callPackage ./nix/dev-shell { };
-        devShells.aarch64-linux = pkgs.callPackage ./nix/dev-shell { };
-      });
+      # 系统列表
+      systems = [ "aarch64-linux" "aarch64-darwin" "x86_64-linux" ];
+      forAllSystems = nixpkgs.lib.genAttrs systems;
+    in
+    flakeOutputs // {
+      # 向后兼容的 devShell 属性
+      devShell = forAllSystems (system:
+        flakeOutputs.devShells.${system}.default
+      );
+    };
 }

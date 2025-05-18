@@ -51,12 +51,25 @@ export const getCurrentUser = async () => {
 
 // 用户登录
 export const login = async (username: string, password: string) => {
-    const formData = new FormData()
-    formData.append('username', username)
-    formData.append('password', password)
-    return callApi('post', '/auth/login', formData, {
-        headers: {
-            'Content-Type': 'application/x-www-form-urlencoded',
-        },
-    })
+    console.log('正在调用登录API，用户名:', username);
+
+    // 创建表单数据
+    const formData = new FormData();
+    formData.append('username', username);
+    formData.append('password', password);
+
+    // 发送登录请求
+    try {
+        const response = await callApi('post', '/auth/login', formData, {
+            headers: {
+                'Content-Type': 'application/x-www-form-urlencoded',
+            },
+        });
+
+        console.log('登录API响应:', JSON.stringify(response).substring(0, 200));
+        return response;
+    } catch (error) {
+        console.error('登录API错误:', error);
+        throw error;
+    }
 } 
