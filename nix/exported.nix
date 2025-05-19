@@ -1,10 +1,10 @@
-{ inputs, ... }:
+{ inputs, lib, ... }:
 
 let self = inputs.self;
 
 in {
   perSystem = { system, pkgs, ... }: {
-    _module.args.pkgs = import inputs.nixpkgs {
+    _module.args.pkgs = lib.mkForce (import inputs.nixpkgs {
       inherit system;
       overlays = [
         (final: prev: {
@@ -19,12 +19,13 @@ in {
           ];
         })
       ];
-    };
+    });
 
     packages = {
       inherit (pkgs) meituan-seckill-admin;
       inherit (pkgs.python3Packages) meituan-seckill-api;
       default = pkgs.python3Packages.meituan-seckill-api;
+      
     };
     checks.run-unit-tests = pkgs.python3Packages.meituan-seckill-api;
   };

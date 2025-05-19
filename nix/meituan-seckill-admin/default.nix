@@ -7,14 +7,14 @@ in stdenv.mkDerivation (finalAttrs: {
   pname = "meituan-seckill-admin";
   version = "0.1.0";
 
-  src = ../../../meituan-seckill-admin;
+  src = ../../meituan-seckill-admin;
 
   nativeBuildInputs = [ nodejs makeWrapper pnpm.configHook ];
 
   # TODO(前端增加了新的包这里的hash需要重新计算)更新 pnpm 依赖获取配置
   pnpmDeps = pnpm.fetchDeps {
     inherit (finalAttrs) pname version src;
-    hash = "sha256-mug8+48Z51F7PyZsVcD2BQ+1YpFz2V0hGOUsq4Z6yO0=";
+    hash = "sha256-AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=";
   };
 
   buildPhase = ''
