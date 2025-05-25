@@ -1,63 +1,125 @@
-# Simple Guide to start python development
+# 🚀 美团外卖抢单系统抢券url管理
 
-1. 创建一个文件夹用于存放代码文件，例如 `cloude-trace`，并进入相应文件夹
+## 📖 项目简介
 
+这是一个基于 FastAPI 和 React 构建的美团秒杀系统，包含后端 API 服务和管理后台界面。
+
+## 🛠️ 技术栈
+
+### 后端
+- 🐍 Python 3.12+
+- ⚡ FastAPI
+- 🗄️ MySQL
+- 🔒 JWT 认证
+- 📝 Alembic 数据库迁移
+
+### 前端
+- ⚛️ React 18
+- 🎨 Ant Design
+- 📊 ECharts
+- 🔄 Redux Toolkit
+
+## 🚀 快速开始
+
+### 使用 Nix 开发（推荐）
+
+1. 📦 克隆项目并进入目录
 ```bash
-cd ~
-mkdir work/cloude-trace -p
-cd work/cloude-trace
+git clone <repository-url>
+cd meituan-seckill
 ```
 
-2. 使用 `nix flake template` 初始化项目
-
-```bash
-nix flake init -t "git+ssh://git@github.com/quant-wonderland/wonder-pkgs#python-dev-starter" --refresh  
-nix flake lock --override-input nixpkgs "github:NixOS/nixpkgs?rev=841889913dfd06a70ffb39f603e29e46f45f0c1a"
-```
-
-3. 查看初始化后的文件结构，查看 `README.md` 文件，按照 `README.md` 文件的指引进行开发
-
-
-# Python development Starter Kit User Guide 如何使用本 template 快速创建一个python repo
-
-## 1. 目录结构
-
-以下仅展示现在有目录结构, 这只是一个基础的模板目的仅为了方便快速构建一个python repo。
-
-```bash
-├── flake.lock # 依赖包的版本锁定文件，无需更改
-├── flake.nix # 依赖包的版本以及依赖关系文件，如无必要无需更改
-├── nix
-│   └── pkgs
-│       ├── dev-shell
-│              └── default.nix # 依赖包的版本以及依赖关系文件，如无必要无需更改
-│     
-├── README.md
-├── your_project_folder
-│   ├── __init__.py # init 文件，增加新的函数时需要增加 import
-│   ├── other_template_file1.py # 示例python文件
-│   ├── other_template_file2.py # 示例python文件
-│   ├── other_template_file3.py # 示例python文件
-│   ├── other_template_file4.py # 示例python文件
-│   ├── other_template_file5.py # 示例python文件
-│   └── main.py # 示例python文件, 此文件一般为项目启动文件
-└── setup.py # 打包为 pkgs 的话需要, 需要根据你自己的命令行启动方式构建打包文件
-```
-
-
-
-
-## 2. 运行
-
-首先执行如下命令进入开发环境：
-
+2. 🔧 进入开发环境
 ```bash
 nix develop
 ```
 
-使用命令行方式运行你的项目：
-
+3. 🏃‍♂️ 启动后端服务
 ```bash
-python -m path.to.main:main
+# 初始化数据库（首次运行需要）
+python meituan_seckill_api/db_init.py
+
+# 启动API服务
+python -m meituan_seckill_api.startup
 ```
+
+4. 🖥️ 启动前端开发服务器
+```bash
+cd meituan-seckill-admin
+pnpm install
+pnpm dev
+```
+
+### 使用 Nix 构建
+
+1. 🔨 构建后端服务
+```bash
+# 构建API服务
+nix build .#meituan-seckill-api
+
+# 运行构建后的服务
+./result/bin/meituan-seckill-api
+```
+
+2. 🏗️ 构建前端界面
+```bash
+# 构建管理后台
+nix build .#meituan-seckill-admin
+
+# 构建结果在 ./result 目录
+```
+
+### 环境变量配置
+
+📝 后端服务需要以下环境变量：
+
+- `MEITUAN_SECKILL_CONFIG`: 配置文件路径，默认为 `config.json`
+- `MYSQL_HOST`: MySQL 主机地址
+- `MYSQL_PORT`: MySQL 端口
+- `MYSQL_USER`: MySQL 用户名
+- `MYSQL_PASSWORD`: MySQL 密码
+- `MYSQL_DATABASE`: MySQL 数据库名
+
+## 🔧 开发指南
+
+### 后端开发
+
+1. 📁 目录结构
+```
+meituan_seckill_api/
+├── app/              # 主应用目录
+│   ├── core/        # 核心功能
+│   ├── crud/        # 数据库操作
+│   ├── models/      # 数据库模型
+│   ├── schemas/     # Pydantic 模型
+│   └── routers/     # API 路由
+├── alembic/         # 数据库迁移
+└── tests/           # 测试文件
+```
+
+2. 🔄 数据库迁移
+```bash
+# 创建迁移
+alembic revision --autogenerate -m "migration message"
+
+# 应用迁移
+alembic upgrade head
+```
+
+### 前端开发
+
+1. 📁 目录结构
+```
+meituan-seckill-admin/
+├── src/
+│   ├── components/  # React 组件
+│   ├── pages/      # 页面组件
+│   ├── services/   # API 服务
+│   └── store/      # Redux store
+└── public/         # 静态资源
+```
+
+## 📝 许可证
+
+本项目采用 MIT 许可证
 
