@@ -1,19 +1,29 @@
-from setuptools import setup, find_packages
+from setuptools import setup, find_namespace_packages
 import unittest
 
 
 
 
 setup(
-    name="you package name",
+    name="meituan-seckill-api",
     version="0.0.1",
-    author="author name",
-    author_email="author email",
-    packages=find_packages(),
+    author="tt619252615",
+    author_email="cz619252615@gmail.com",
+    packages=find_namespace_packages(include=['meituan_seckill_api*', 'app*']),
+    package_data={
+        'meituan_seckill_api': [
+            'config.json',
+            'config.example.json',
+            '*.py',
+            'app/**/*',
+            'alembic/**/*'
+        ],
+    },
+    include_package_data=True,
     entry_points={
         "console_scripts": [
-            "package_name=path.to.main:main",
+            "meituan-seckill-api=meituan_seckill_api.startup:start",
         ]
     },
-    python_requires=">=3.6",
+    python_requires=">=3.12",
 )

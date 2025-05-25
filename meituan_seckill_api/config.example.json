@@ -1,0 +1,16 @@
+{
+    "SECRET_KEY": "your-secret-key-here",
+    "ACCESS_TOKEN_EXPIRE_MINUTES": 11520,
+    "BACKEND_CORS_ORIGINS": [
+        "http://localhost:3000",
+        "http://localhost:5173",
+        "https://yourdomain.com"
+    ],
+    "MYSQL_HOST": "localhost",
+    "MYSQL_PORT": "3306",
+    "MYSQL_USER": "meituan_user",
+    "MYSQL_PASSWORD": "your_secure_password",
+    "MYSQL_DATABASE": "meituan_seckill",
+    "FIRST_SUPERUSER": "admin",
+    "FIRST_SUPERUSER_PASSWORD": "change_this_password"
+}

@@ -1,60 +1,179 @@
 // 美团外卖自动抢券工具
 // 基本配置
 const BASE_GET_URL = 'https://promotion.waimai.meituan.com/lottery/limitcouponcomponent/info?couponReferIds=';
+// 设置API服务器地址
+const API_SERVER_URL = 'http://192.168.31.186:8000';  //  需要https服务
 let taskConfigs = [];
 let currentStatus = '未启动';
 let logMessages = [];
 let totalRequests = 0;
 let successRequests = 0;
 let priorityRequests = 0;
+let apiKey = '';  // 存储API密钥
 
 // 新增高级配置选项
 let advancedConfig = {
     requestsPerTask: 3, // 默认每个任务请求3次
     preStartMilliseconds: 500, // 默认提前500毫秒开始
-    logDirection: 'bottom' // 默认日志显示方向(bottom: 最新在底部, top: 最新在顶部)
+    logDirection: 'bottom', // 默认日志显示方向(bottom: 最新在底部, top: 最新在顶部)
+    autoSyncTasks: false, // 是否自动同步远程任务
+    syncInterval: 5 * 60 * 1000, // 默认5分钟同步一次任务
 };
 
-// 判断必要的依赖是否已加载
-const requiredLibs = {
-    axios: 'https://cdn.jsdelivr.net/npm/axios@1.1.2/dist/axios.min.js'
-};
+// HTTP客户端 - 使用原生fetch替代axios
+const httpClient = {
+    async get(url, options = {}) {
+        const fetchOptions = {
+            method: 'GET',
+            headers: options.headers || {},
+            // 增加跨域相关设置
+            mode: 'cors',
+            credentials: 'omit' // 不发送cookies，避免某些CORS问题
+        };
 
-// 加载依赖库
-async function loadDependencies() {
-    const loadPromises = [];
-
-    // 检查并加载 axios
-    if (typeof axios === 'undefined') {
-        loadPromises.push(
-            new Promise((resolve, reject) => {
-                const script = document.createElement('script');
-                script.src = requiredLibs.axios;
-                script.onload = () => {
-                    console.log('✅ Axios 加载成功');
-                    resolve();
-                };
-                script.onerror = () => {
-                    console.error('❌ Axios 加载失败');
-                    reject(new Error('Axios 加载失败'));
-                };
-                document.head.appendChild(script);
-            })
-        );
-    }
-
-    // 等待所有依赖加载完成
-    if (loadPromises.length > 0) {
         try {
-            await Promise.all(loadPromises);
-            return true;
+            addLog(`📡 发送GET请求: ${url.substring(0, 50)}...`, false, false, true);
+
+            // 添加超时处理
+            const timeoutPromise = new Promise((_, reject) =>
+                setTimeout(() => reject(new Error('请求超时')), 15000));
+
+            // 竞争超时和实际请求
+            const response = await Promise.race([
+                fetch(url, fetchOptions),
+                timeoutPromise
+            ]);
+
+            if (!response.ok) {
+                const errorText = await response.text().catch(() => '无错误详情');
+                throw {
+                    response: {
+                        status: response.status,
+                        data: { detail: errorText }
+                    },
+                    message: `请求失败: ${response.status} ${response.statusText}`
+                };
+            }
+
+            // 解析JSON响应
+            try {
+                const data = await response.json();
+                return { data, status: response.status };
+            } catch (jsonError) {
+                throw {
+                    message: `无法解析响应数据: ${jsonError.message}`,
+                    originalResponse: await response.text().catch(() => '无法获取原始响应')
+                };
+            }
         } catch (error) {
-            console.error('依赖库加载失败:', error);
-            return false;
+            // 详细记录错误
+            console.error('GET请求详细错误:', error);
+
+            // 更友好的错误信息
+            const errorMessage = getDetailedErrorMessage(error);
+            addLog(`⚠️ 请求失败详情: ${errorMessage}`, false, true);
+
+            if (!error.response) {
+                error.response = { data: { detail: error.message || '网络请求失败' } };
+            }
+            throw error;
+        }
+    },
+
+    async post(url, data, options = {}) {
+        const fetchOptions = {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+                ...options.headers
+            },
+            body: JSON.stringify(data),
+            // 增加跨域相关设置
+            mode: 'cors',
+            credentials: 'omit'
+        };
+
+        try {
+            addLog(`📡 发送POST请求: ${url.substring(0, 50)}...`, false, false, true);
+
+            // 添加超时处理
+            const timeoutPromise = new Promise((_, reject) =>
+                setTimeout(() => reject(new Error('请求超时')), 15000));
+
+            // 竞争超时和实际请求
+            const response = await Promise.race([
+                fetch(url, fetchOptions),
+                timeoutPromise
+            ]);
+
+            if (!response.ok) {
+                const errorText = await response.text().catch(() => '无错误详情');
+                throw {
+                    response: {
+                        status: response.status,
+                        data: { detail: errorText }
+                    },
+                    message: `请求失败: ${response.status} ${response.statusText}`
+                };
+            }
+
+            // 解析JSON响应
+            try {
+                const data = await response.json();
+                return { data, status: response.status };
+            } catch (jsonError) {
+                throw {
+                    message: `无法解析响应数据: ${jsonError.message}`,
+                    originalResponse: await response.text().catch(() => '无法获取原始响应')
+                };
+            }
+        } catch (error) {
+            // 详细记录错误
+            console.error('POST请求详细错误:', error);
+
+            // 更友好的错误信息
+            const errorMessage = getDetailedErrorMessage(error);
+            addLog(`⚠️ 请求失败详情: ${errorMessage}`, false, true);
+
+            if (!error.response) {
+                error.response = { data: { detail: error.message || '网络请求失败' } };
+            }
+            throw error;
         }
     }
+};
 
-    return true;
+// 辅助函数：获取详细错误信息
+function getDetailedErrorMessage(error) {
+    if (error.name === 'TypeError' && error.message.includes('Failed to fetch')) {
+        return '网络请求失败，可能是跨域问题或服务器不可达';
+    }
+
+    if (error.name === 'AbortError') {
+        return '请求被中止';
+    }
+
+    if (error.message === '请求超时') {
+        return '请求超时，服务器响应时间过长';
+    }
+
+    if (error.response) {
+        if (error.response.status === 401 || error.response.status === 403) {
+            return 'API密钥无效或权限不足';
+        }
+
+        if (error.response.status === 404) {
+            return 'API端点不存在';
+        }
+
+        if (error.response.status >= 500) {
+            return '服务器内部错误，请稍后重试';
+        }
+
+        return `HTTP错误 ${error.response.status}: ${error.response.data?.detail || '未知错误'}`;
+    }
+
+    return error.message || '未知错误';
 }
 
 // 从 postUrl 提取 couponReferId
@@ -226,7 +345,7 @@ async function send(postUrl, config, taskIndex) {
         config.headers.mtgsig = mtgsig;
 
         // 发送post请求
-        const res = await axios.post(postUrl, req.data, config);
+        const res = await httpClient.post(postUrl, req.data, config);
 
         // 处理响应
         if (res.data.msg === '时间验证失败') {
@@ -277,8 +396,7 @@ async function start(taskIndex) {
 
     // 发送GET请求检查券状态
     try {
-        axios.defaults.withCredentials = true;
-        const res = await axios.get(getUrl, config);
+        const res = await httpClient.get(getUrl, config);
 
         // 分析响应
         if (res.data && res.data.data && res.data.data.couponInfo) {
@@ -391,8 +509,7 @@ async function testTask(taskIndex) {
     try {
         // 3. 测试GET请求获取券信息
         addLog(`📤 发送GET请求获取券信息...`, false, false, true);
-        axios.defaults.withCredentials = true;
-        const res = await axios.get(getUrl, config);
+        const res = await httpClient.get(getUrl, config);
 
         // 输出GET请求响应
         if (res.data && res.data.code === 0) {
@@ -457,7 +574,7 @@ async function testTask(taskIndex) {
 
                     // 7. 发送一次POST请求
                     addLog(`📤 发送POST请求(仅一次)...`, false, false, true);
-                    const postRes = await axios.post(task.postUrl, req.data, config);
+                    const postRes = await httpClient.post(task.postUrl, req.data, config);
 
                     // 输出POST响应结果
                     if (postRes.data) {
@@ -522,6 +639,20 @@ function initUI() {
         </div>
         
         <div class="seckill-body">
+            <!-- API密钥输入区域 -->
+            <div class="section">
+                <h3><span class="section-icon">🔑</span> API密钥</h3>
+                <div class="api-key-container">
+                    <div class="input-container">
+                        <input type="password" id="api-key-input" placeholder="请输入API密钥">
+                    </div>
+                    <div class="api-key-actions">
+                        <button id="verify-api-key-btn" class="small-btn">验证密钥</button>
+                        <button id="fetch-tasks-btn" class="small-btn secondary-btn">获取任务</button>
+                    </div>
+                </div>
+            </div>
+            
             <div class="section">
                 <h3><span class="section-icon">⏰</span> 选择抢券时间</h3>
                 <div class="time-buttons">
@@ -639,6 +770,14 @@ function initUI() {
                                 <option value="mini">迷你模式</option>
                             </select>
                         </div>
+                        <div class="setting-item">
+                            <label for="auto-sync-tasks">自动同步远程任务:</label>
+                            <input type="checkbox" id="auto-sync-tasks">
+                        </div>
+                        <div class="setting-item">
+                            <label for="sync-interval">同步间隔(分钟):</label>
+                            <input type="number" id="sync-interval" value="5" min="1" max="60">
+                        </div>
                     </div>
                     <div class="settings-actions">
                         <button id="save-settings-btn" class="small-btn">保存设置</button>
@@ -697,6 +836,18 @@ function initUI() {
             cursor: move; /* 指示可拖动 */
             user-select: none; /* 防止文本选择 */
             touch-action: none; /* 在移动设备上避免触摸操作冲突 */
+        }
+        
+        /* API密钥相关样式 */
+        .api-key-container {
+            display: flex;
+            flex-direction: column;
+            gap: 10px;
+        }
+        
+        .api-key-actions {
+            display: flex;
+            gap: 8px;
         }
         
         /* 移动端适配 */
@@ -1364,6 +1515,22 @@ function initUI() {
 
     // 设置拖动功能
     makeDraggable(container);
+
+    // 在API密钥输入区域后添加API服务器地址设置
+    const apiKeySection = document.querySelector('.section:nth-child(1)');
+    if (apiKeySection) {
+        const apiServerSettingDiv = document.createElement('div');
+        apiServerSettingDiv.className = 'api-server-setting';
+        apiServerSettingDiv.innerHTML = `
+            <div class="input-container">
+                <input type="text" id="api-server-input" placeholder="API服务器地址" value="${API_SERVER_URL}">
+            </div>
+            <div class="api-server-actions">
+                <button id="save-api-server-btn" class="small-btn">保存服务器地址</button>
+            </div>
+        `;
+        apiKeySection.appendChild(apiServerSettingDiv);
+    }
 }
 
 // 实现拖动功能
@@ -1470,7 +1637,7 @@ function updateTasksList() {
     tasksContainer.innerHTML = '';
 
     if (taskConfigs.length === 0) {
-        tasksContainer.innerHTML = '<div class="empty-tasks">暂无任务，请添加抢券任务...</div>';
+        tasksContainer.innerHTML = '<div class="empty-tasks">暂无任务，请添加抢券任务或从远程获取...</div>';
         return;
     }
 
@@ -1479,7 +1646,10 @@ function updateTasksList() {
         taskItem.className = 'task-item';
         taskItem.innerHTML = `
             <div class="task-item-info">
-                <div class="task-item-name">${task.name}</div>
+                <div class="task-item-name">
+                    ${task.name}
+                    ${task.priority > 0 ? `<span class="priority-badge">优先级 ${task.priority}</span>` : ''}
+                </div>
                 <div class="task-item-time">
                     <span class="time-icon">⏰</span> ${task.time.split(':').slice(0, 2).join(':')}
                     <span class="freq-label">· ${task.frequency}ms</span>
@@ -1535,592 +1705,170 @@ function updateTasksList() {
 
 // 绑定UI事件
 function bindEvents() {
-    // 关闭按钮
-    const closeBtn = document.getElementById('close-btn');
-    if (closeBtn) {
-        closeBtn.addEventListener('click', () => {
-            const container = document.getElementById('seckill-container');
-            if (container) {
-                // 添加淡出动画
-                container.style.opacity = '0';
-                container.style.transform = 'scale(0.95)';
-                setTimeout(() => {
-                    container.style.display = 'none';
-                    container.style.opacity = '1';
-                    container.style.transform = 'scale(1)';
-                }, 300);
-            }
-        });
-    }
+    // API密钥相关事件
+    const verifyApiKeyBtn = document.getElementById('verify-api-key-btn');
+    const fetchTasksBtn = document.getElementById('fetch-tasks-btn');
+    const apiKeyInput = document.getElementById('api-key-input');
 
-    // 最小化按钮
-    const minBtn = document.getElementById('minimize-btn');
-    if (minBtn) {
-        minBtn.addEventListener('click', () => {
-            const container = document.getElementById('seckill-container');
-            if (container) {
-                if (container.classList.contains('minimized')) {
-                    container.classList.remove('minimized');
-                    const body = container.querySelector('.seckill-body');
-                    if (body) {
-                        body.style.display = 'block';
-                        setTimeout(() => {
-                            body.style.opacity = '1';
-                        }, 10);
-                    }
-                } else {
-                    container.classList.add('minimized');
-                    const body = container.querySelector('.seckill-body');
-                    if (body) {
-                        body.style.opacity = '0';
-                        setTimeout(() => {
-                            body.style.display = 'none';
-                        }, 300);
-                    }
+    if (verifyApiKeyBtn && apiKeyInput) {
+        verifyApiKeyBtn.addEventListener('click', async () => {
+            const key = apiKeyInput.value.trim();
+            if (!key) {
+                addLog('❌ 请输入API密钥', false, true);
+                apiKeyInput.classList.add('error');
+                setTimeout(() => {
+                    apiKeyInput.classList.remove('error');
+                }, 1000);
+                return;
+            }
+
+            verifyApiKeyBtn.disabled = true;
+            verifyApiKeyBtn.textContent = '验证中...';
+
+            const isValid = await validateApiKey(key);
+
+            verifyApiKeyBtn.disabled = false;
+            verifyApiKeyBtn.textContent = '验证密钥';
+
+            if (isValid) {
+                apiKey = key;
+                // 保存到localStorage，方便下次使用
+                localStorage.setItem('seckill_api_key', key);
+                apiKeyInput.value = '********'; // 隐藏密钥
+
+                // 自动获取任务
+                if (fetchTasksBtn) {
+                    fetchTasksBtn.click();
                 }
             }
         });
     }
 
-    // 折叠按钮
-    const collapseBtn = document.getElementById('collapse-btn');
-    if (collapseBtn) {
-        collapseBtn.addEventListener('click', () => {
-            const container = document.getElementById('seckill-container');
-            if (container) {
-                container.classList.toggle('collapsed');
-            }
-        });
-    }
-
-    // 可折叠部分
-    document.querySelectorAll('.section-header.collapsible').forEach(header => {
-        header.addEventListener('click', () => {
-            header.classList.toggle('active');
-            const targetId = header.getAttribute('data-target');
-            const content = document.getElementById(targetId);
-            if (content) {
-                content.classList.toggle('collapsed');
-            }
-        });
-    });
-
-    // 时间选择按钮
-    document.querySelectorAll('.time-btn').forEach(btn => {
-        btn.addEventListener('click', (e) => {
-            document.querySelectorAll('.time-btn').forEach(b => b.classList.remove('selected'));
-
-            // 添加选择动画
-            e.target.classList.add('selecting');
-            setTimeout(() => {
-                e.target.classList.remove('selecting');
-                e.target.classList.add('selected');
-            }, 300);
-
-            const targetDisplay = document.getElementById('target-time-display');
-            if (targetDisplay) {
-                targetDisplay.textContent = e.target.textContent;
-            }
-        });
-    });
-
-    // 自定义时间设置按钮
-    const setCustomTimeBtn = document.getElementById('set-custom-time-btn');
-    if (setCustomTimeBtn) {
-        setCustomTimeBtn.addEventListener('click', () => {
-            const customTimeInput = document.getElementById('custom-time');
-            const customTimeMsInput = document.getElementById('custom-time-ms');
-
-            if (!customTimeInput) return;
-
-            // 获取时间
-            const timeValue = customTimeInput.value;
-            const msValue = customTimeMsInput ? customTimeMsInput.value : '000';
-
-            if (!timeValue) {
-                addLog('❌ 请输入有效时间', false, true);
-                customTimeInput.classList.add('error');
-                setTimeout(() => {
-                    customTimeInput.classList.remove('error');
-                }, 1000);
-                return;
-            }
-
-            // 格式化时间字符串
-            const [hours, minutes, seconds] = timeValue.split(':');
-            const formattedTime = `${hours}:${minutes}:${seconds || '00'}:${msValue.padStart(3, '0')}`;
-            const displayTime = `${hours}:${minutes}${seconds ? ':' + seconds : ''}`;
-
-            // 取消现有选择
-            document.querySelectorAll('.time-btn').forEach(btn => {
-                btn.classList.remove('selected');
-            });
-
-            // 创建新的时间按钮
-            const customBtn = document.createElement('button');
-            customBtn.className = 'time-btn selected';
-            customBtn.setAttribute('data-time', formattedTime);
-            customBtn.textContent = displayTime;
-
-            // 添加到时间按钮区域
-            const timeButtons = document.querySelector('.time-buttons');
-            if (timeButtons) {
-                // 如果已有自定义按钮则替换
-                const existingCustomBtn = timeButtons.querySelector('.custom-time-btn');
-                if (existingCustomBtn) {
-                    timeButtons.replaceChild(customBtn, existingCustomBtn);
-                } else {
-                    timeButtons.appendChild(customBtn);
+    if (fetchTasksBtn) {
+        fetchTasksBtn.addEventListener('click', async () => {
+            if (!apiKey) {
+                const key = apiKeyInput.value.trim();
+                if (!key) {
+                    addLog('❌ 请先验证API密钥', false, true);
+                    return;
                 }
-
-                customBtn.classList.add('custom-time-btn');
-
-                // 绑定点击事件
-                customBtn.addEventListener('click', (e) => {
-                    document.querySelectorAll('.time-btn').forEach(b => b.classList.remove('selected'));
-                    e.target.classList.add('selected');
-
-                    const targetDisplay = document.getElementById('target-time-display');
-                    if (targetDisplay) {
-                        targetDisplay.textContent = e.target.textContent;
-                    }
-                });
-
-                // 选择该按钮
-                customBtn.click();
+                apiKey = key;
             }
 
-            addLog(`✅ 已设置自定义时间: ${displayTime}`, true);
+            fetchTasksBtn.disabled = true;
+            fetchTasksBtn.textContent = '获取中...';
+
+            await fetchRemoteTasks();
+
+            fetchTasksBtn.disabled = false;
+            fetchTasksBtn.textContent = '获取任务';
         });
     }
 
-    // 高级设置保存按钮
-    const saveSettingsBtn = document.getElementById('save-settings-btn');
-    if (saveSettingsBtn) {
-        saveSettingsBtn.addEventListener('click', () => {
-            // 获取设置值
-            const preStartTime = document.getElementById('pre-start-time');
-            const logDirection = document.getElementById('log-direction');
-            const displayMode = document.getElementById('display-mode');
-
-            if (preStartTime) {
-                advancedConfig.preStartMilliseconds = parseInt(preStartTime.value) || 500;
-            }
-
-            if (logDirection) {
-                const newDirection = logDirection.value;
-                // 如果日志方向变化了，需要重新排列日志
-                if (newDirection !== advancedConfig.logDirection) {
-                    advancedConfig.logDirection = newDirection;
-                    // 反转日志数组
-                    logMessages.reverse();
-                    updateLogDisplay();
-                }
-            }
-
-            if (displayMode) {
-                const container = document.getElementById('seckill-container');
-                if (container) {
-                    // 移除所有模式类
-                    container.classList.remove('normal-mode', 'compact-mode', 'mini-mode');
-
-                    // 添加新的模式类
-                    if (displayMode.value !== 'normal') {
-                        container.classList.add(displayMode.value + '-mode');
-                    }
-                }
-            }
-
-            addLog('✅ 设置已保存', true);
-            saveSettingsBtn.classList.add('clicked');
-            setTimeout(() => {
-                saveSettingsBtn.classList.remove('clicked');
-            }, 300);
-        });
+    // 检查是否有保存的API密钥
+    const savedApiKey = localStorage.getItem('seckill_api_key');
+    if (savedApiKey && apiKeyInput) {
+        apiKeyInput.value = savedApiKey;
+        apiKey = savedApiKey;
+        addLog('ℹ️ 已从本地加载API密钥', false, false, true);
     }
 
-    // 重置设置按钮
-    const resetSettingsBtn = document.getElementById('reset-settings-btn');
-    if (resetSettingsBtn) {
-        resetSettingsBtn.addEventListener('click', () => {
-            // 重置配置
-            advancedConfig = {
-                requestsPerTask: 3,
-                preStartMilliseconds: 500,
-                logDirection: 'bottom'
-            };
-
-            // 更新UI
-            const preStartTime = document.getElementById('pre-start-time');
-            const logDirection = document.getElementById('log-direction');
-            const displayMode = document.getElementById('display-mode');
-
-            if (preStartTime) preStartTime.value = 500;
-            if (logDirection) logDirection.value = 'bottom';
-            if (displayMode) displayMode.value = 'normal';
-
-            // 重置容器类
-            const container = document.getElementById('seckill-container');
-            if (container) {
-                container.classList.remove('normal-mode', 'compact-mode', 'mini-mode');
-            }
-
-            // 重新排列日志
-            if (advancedConfig.logDirection === 'bottom') {
-                logMessages.sort((a, b) => logMessages.indexOf(a) - logMessages.indexOf(b));
-            }
-            updateLogDisplay();
-
-            addLog('🔄 已重置所有设置', false, false, true);
-        });
+    // 高级设置 - 自动同步任务选项
+    const autoSyncCheckbox = document.getElementById('auto-sync-tasks');
+    if (autoSyncCheckbox) {
+        autoSyncCheckbox.checked = advancedConfig.autoSyncTasks;
     }
 
-    // 添加任务按钮
-    const addTaskBtn = document.getElementById('add-task-btn');
-    if (addTaskBtn) {
-        addTaskBtn.addEventListener('click', () => {
-            const postUrlInput = document.getElementById('post-url-input');
-            const taskNameInput = document.getElementById('task-name-input');
-            const frequencyInput = document.getElementById('frequency-input');
-            const requestsCountInput = document.getElementById('requests-count-input');
+    // API服务器地址保存按钮
+    const saveApiServerBtn = document.getElementById('save-api-server-btn');
+    const apiServerInput = document.getElementById('api-server-input');
 
-            if (!postUrlInput || !taskNameInput || !frequencyInput) {
-                console.error('找不到输入元素');
+    if (saveApiServerBtn && apiServerInput) {
+        // 从本地存储加载之前保存的服务器地址
+        const savedApiServer = localStorage.getItem('seckill_api_server');
+        if (savedApiServer) {
+            API_SERVER_URL = savedApiServer;
+            apiServerInput.value = savedApiServer;
+            addLog(`ℹ️ 已从本地加载API服务器地址: ${savedApiServer}`, false, false, true);
+        }
+
+        saveApiServerBtn.addEventListener('click', () => {
+            const newApiServer = apiServerInput.value.trim();
+            if (!newApiServer) {
+                addLog('❌ API服务器地址不能为空', false, true);
                 return;
             }
 
-            // 添加点击反馈
-            addTaskBtn.classList.add('clicked');
-            setTimeout(() => {
-                addTaskBtn.classList.remove('clicked');
-            }, 300);
-
-            const postUrl = postUrlInput.value.trim();
-            const taskName = taskNameInput.value.trim() || '未命名任务';
-            const frequency = parseInt(frequencyInput.value) || 100;
-            const requestsPerTask = parseInt(requestsCountInput?.value) || advancedConfig.requestsPerTask;
-
-            const selectedTimeBtn = document.querySelector('.time-btn.selected');
-            const timeValue = selectedTimeBtn ? selectedTimeBtn.getAttribute('data-time') : null;
-
-            if (!postUrl) {
-                addLog('❌ 请输入POST URL', false, true);
-                postUrlInput.classList.add('error');
-                setTimeout(() => {
-                    postUrlInput.classList.remove('error');
-                }, 1000);
+            // 验证URL格式
+            try {
+                new URL(newApiServer);
+            } catch (e) {
+                addLog('❌ 无效的URL格式', false, true);
                 return;
             }
 
-            if (!timeValue) {
-                addLog('❌ 请选择抢券时间', false, true);
-                document.querySelector('.time-buttons').classList.add('error');
-                setTimeout(() => {
-                    document.querySelector('.time-buttons').classList.remove('error');
-                }, 1000);
-                return;
-            }
+            API_SERVER_URL = newApiServer;
+            localStorage.setItem('seckill_api_server', newApiServer);
+            addLog(`✅ API服务器地址已保存: ${newApiServer}`, true);
 
-            const couponReferId = extractCouponReferId(postUrl);
-            if (!couponReferId) {
-                addLog('❌ 无法从URL提取券ID，请检查URL格式', false, true);
-                postUrlInput.classList.add('error');
-                setTimeout(() => {
-                    postUrlInput.classList.remove('error');
-                }, 1000);
-                return;
-            }
-
-            const task = {
-                name: taskName,
-                time: timeValue,
-                postUrl: postUrl,
-                frequency: frequency,
-                requestsPerTask: requestsPerTask,
-                running: false
-            };
-
-            taskConfigs.push(task);
-            updateTasksList();
-
-            // 获取易读的时间格式
-            const readableTime = timeValue.split(':').slice(0, 2).join(':');
-            addLog(`✅ 已添加任务: ${taskName}，时间: ${readableTime}，请求次数: ${requestsPerTask}次`, true);
-
-            // 清空输入并添加动画效果
-            postUrlInput.value = '';
-            taskNameInput.value = '';
-
-            // 滚动到任务列表
-            const tasksContainer = document.getElementById('tasks-container');
-            if (tasksContainer) {
-                tasksContainer.scrollTop = tasksContainer.scrollHeight;
-            }
-        });
-    }
-
-    // 启动抢券按钮
-    const startBtn = document.getElementById('start-btn');
-    if (startBtn) {
-        startBtn.addEventListener('click', () => {
-            if (taskConfigs.length === 0) {
-                addLog('❌ 请先添加任务', false, true);
-                return;
-            }
-
-            // 添加点击反馈
-            startBtn.classList.add('clicked');
-            setTimeout(() => {
-                startBtn.classList.remove('clicked');
-            }, 300);
-
-            if (currentStatus === '运行中') {
-                // 停止所有任务
-                taskConfigs.forEach(task => {
-                    task.running = false;
-                });
-                currentStatus = '已停止';
-                startBtn.innerHTML = '<span class="btn-icon">▶</span> 启动抢券';
-                addLog('⏹️ 已停止所有抢券任务', false, false, true);
-            } else {
-                // 启动所有任务
-                currentStatus = '运行中';
-                startBtn.innerHTML = '<span class="btn-icon">■</span> 停止抢券';
-                addLog('🚀 开始执行抢券任务', false, false, true);
-
-                taskConfigs.forEach((task, index) => {
-                    const delayMs = calculateNextRunTime(task.time);
-                    const delaySeconds = Math.floor(delayMs / 1000);
-
-                    // 显示任务将在何时启动
-                    let timeDescription;
-                    if (delaySeconds > 3600) {
-                        timeDescription = `${Math.floor(delaySeconds / 3600)}小时${Math.floor((delaySeconds % 3600) / 60)}分钟`;
-                    } else if (delaySeconds > 60) {
-                        timeDescription = `${Math.floor(delaySeconds / 60)}分钟${delaySeconds % 60}秒`;
-                    } else {
-                        timeDescription = `${delaySeconds}秒`;
-                    }
-
-                    // 显示是否有提前量
-                    let preStartNote = '';
-                    if (advancedConfig.preStartMilliseconds > 0) {
-                        preStartNote = `(提前${advancedConfig.preStartMilliseconds}毫秒)`;
-                    }
-
-                    addLog(`⏰ 任务 "${task.name}" 将在 ${timeDescription}后启动 ${preStartNote}`, false, false, true);
-
-                    // 设置定时器
-                    setTimeout(() => {
-                        if (currentStatus === '运行中') {
-                            start(index);
-                        }
-                    }, delayMs);
-                });
-            }
-
-            updateStatusDisplay();
-            updateTasksList(); // 更新任务列表以显示运行状态
-        });
-    }
-
-    // 测试配置按钮
-    const testBtn = document.getElementById('test-btn');
-    if (testBtn) {
-        testBtn.addEventListener('click', () => {
-            const postUrlInput = document.getElementById('post-url-input');
-            const taskNameInput = document.getElementById('task-name-input');
-            const frequencyInput = document.getElementById('frequency-input');
-            const requestsCountInput = document.getElementById('requests-count-input');
-
-            if (!postUrlInput || !taskNameInput || !frequencyInput) {
-                console.error('找不到输入元素');
-                return;
-            }
-
-            // 添加点击反馈
-            testBtn.classList.add('clicked');
-            setTimeout(() => {
-                testBtn.classList.remove('clicked');
-            }, 300);
-
-            const postUrl = postUrlInput.value.trim();
-            const taskName = taskNameInput.value.trim() || '测试任务';
-            const frequency = parseInt(frequencyInput.value) || 100;
-            const requestsPerTask = parseInt(requestsCountInput?.value) || advancedConfig.requestsPerTask;
-
-            if (!postUrl) {
-                addLog('❌ 请输入POST URL', false, true);
-                postUrlInput.classList.add('error');
-                setTimeout(() => {
-                    postUrlInput.classList.remove('error');
-                }, 1000);
-                return;
-            }
-
-            const couponReferId = extractCouponReferId(postUrl);
-            if (!couponReferId) {
-                addLog('❌ 无法从URL提取券ID，请检查URL格式', false, true);
-                postUrlInput.classList.add('error');
-                setTimeout(() => {
-                    postUrlInput.classList.remove('error');
-                }, 1000);
-                return;
-            }
-
-            // 显示测试中状态
-            testBtn.innerHTML = '<span class="btn-icon loading">⟳</span> 测试中...';
-
-            // 创建临时任务进行测试
-            const tempTask = {
-                name: taskName,
-                time: '00:00:00:000',
-                postUrl: postUrl,
-                frequency: frequency,
-                requestsPerTask: requestsPerTask,
-                running: false
-            };
-
-            const tempIndex = taskConfigs.length;
-            taskConfigs.push(tempTask);
-
-            // 测试配置
-            testTask(tempIndex).finally(() => {
-                // 测试完成后恢复按钮状态
-                setTimeout(() => {
-                    testBtn.innerHTML = '<span class="btn-icon">✓</span> 测试配置';
-                }, 1000);
-
-                // 测试完成后移除临时任务
-                setTimeout(() => {
-                    taskConfigs.pop();
-                }, 1000);
-            });
+            // 重置验证缓存，因为服务器变了
+            lastVerifiedKey = '';
+            lastVerifiedTime = 0;
         });
     }
 }
 
-// 为CSS添加动画和交互样式
-function appendAdditionalStyles() {
-    const styleId = 'seckill-additional-styles';
-    let styleElement = document.getElementById(styleId);
+// 定时同步任务
+let syncTasksInterval = null;
 
-    if (!styleElement) {
-        styleElement = document.createElement('style');
-        styleElement.id = styleId;
-        document.head.appendChild(styleElement);
+function startTaskSync() {
+    if (syncTasksInterval) {
+        clearInterval(syncTasksInterval);
     }
 
-    styleElement.textContent = `
-        /* 动画和交互样式 */
-        .time-btn.selecting {
-            animation: pulse 0.3s ease;
-        }
-        
-        @keyframes pulse {
-            0% { transform: scale(1); }
-            50% { transform: scale(0.95); }
-            100% { transform: scale(1); }
-        }
-        
-        .action-btn.clicked {
-            animation: buttonClick 0.3s ease;
-        }
-        
-        @keyframes buttonClick {
-            0% { transform: scale(1); }
-            50% { transform: scale(0.95); }
-            100% { transform: scale(1); }
-        }
-        
-        .btn-icon.loading {
-            animation: rotate 1s linear infinite;
-            display: inline-block;
-        }
-        
-        @keyframes rotate {
-            from { transform: rotate(0deg); }
-            to { transform: rotate(360deg); }
-        }
-        
-        .error {
-            animation: shake 0.5s ease;
-            border-color: #F44336 !important;
-            box-shadow: 0 0 0 2px rgba(244, 67, 54, 0.2) !important;
-        }
-        
-        @keyframes shake {
-            0%, 100% { transform: translateX(0); }
-            20%, 60% { transform: translateX(-5px); }
-            40%, 80% { transform: translateX(5px); }
-        }
-        
-        .log-time {
-            color: #999;
-            margin-right: 5px;
-        }
-        
-        .log-emoji {
-            transition: all 0.2s ease;
-        }
-        
-        .log-success {
-            color: #4CAF50;
-        }
-        
-        .log-error {
-            color: #F44336;
-        }
-        
-        .log-info {
-            color: #2196F3;
-        }
-        
-        .log-item {
-            opacity: 0;
-            transition: opacity 0.3s ease;
-            padding: 8px;
-            border-radius: 4px;
-        }
-        
-        .log-item:hover {
-            background: #f5f5f5;
-        }
-        
-        .freq-label {
-            color: #999;
-            font-size: 11px;
-            margin-left: 5px;
-        }
-        
-        .running-badge {
-            background: linear-gradient(135deg, #4CAF50, #8BC34A);
-            color: white;
-            font-size: 11px;
-            padding: 2px 6px;
-            border-radius: 10px;
-            margin-left: 8px;
-        }
-        
-        .test-task-btn.loading::after {
-            content: "...";
-            animation: dots 1.5s infinite;
-        }
-        
-        @keyframes dots {
-            0%, 20% { content: "."; }
-            40%, 60% { content: ".."; }
-            80%, 100% { content: "..."; }
-        }
-        
-        .delete-task-btn.confirm {
-            background: rgba(244, 67, 54, 0.1);
-            color: #F44336;
-        }
-    `;
+    if (advancedConfig.autoSyncTasks && apiKey) {
+        syncTasksInterval = setInterval(async () => {
+            await fetchRemoteTasks();
+        }, advancedConfig.syncInterval);
+
+        addLog(`ℹ️ 已启动自动同步任务，间隔: ${advancedConfig.syncInterval / 60000}分钟`, false, false, true);
+    }
 }
 
-// 主函数 - 初始化应用
+// 扩展高级设置保存按钮事件
+function extendSaveSettingsEvent() {
+    const originalSaveSettingsBtn = document.getElementById('save-settings-btn');
+    if (originalSaveSettingsBtn) {
+        const originalClickHandler = originalSaveSettingsBtn.onclick;
+
+        originalSaveSettingsBtn.onclick = async (e) => {
+            // 调用原始处理函数
+            if (originalClickHandler) {
+                originalClickHandler.call(originalSaveSettingsBtn, e);
+            }
+
+            // 添加新的设置保存逻辑
+            const autoSyncCheckbox = document.getElementById('auto-sync-tasks');
+            const syncIntervalInput = document.getElementById('sync-interval');
+
+            if (autoSyncCheckbox) {
+                advancedConfig.autoSyncTasks = autoSyncCheckbox.checked;
+            }
+
+            if (syncIntervalInput) {
+                const interval = parseInt(syncIntervalInput.value);
+                if (interval >= 1 && interval <= 60) {
+                    advancedConfig.syncInterval = interval * 60 * 1000;
+                }
+            }
+
+            // 启动或停止任务同步
+            startTaskSync();
+        };
+    }
+}
+
+// 修改主函数 - 初始化应用
 function initApp() {
     // 初始化UI
     initUI();
@@ -2131,23 +1879,367 @@ function initApp() {
     // 绑定事件
     bindEvents();
 
+    // 扩展设置保存事件
+    extendSaveSettingsEvent();
+
     // 添加初始日志
     addLog('🎉 美团外卖自动抢券工具已加载', false, false, true);
+
+    // 如果有API密钥，自动同步任务
+    if (apiKey) {
+        setTimeout(async () => {
+            await fetchRemoteTasks();
+            startTaskSync();
+        }, 1000);
+    }
 
     // 启动时间显示更新
     setInterval(updateTimeDisplay, 1000);
 }
 
-// 立即执行初始化
-(async function () {
-    // 先加载必要的依赖库
+// 为CSS添加额外的样式
+function appendAdditionalStyles() {
+    // ... 原有代码保留 ...
+
+    // 添加API密钥相关样式
+    const additionalStyles = `
+        .api-key-container {
+            margin-top: 10px;
+        }
+        
+        .api-key-actions {
+            display: flex;
+            justify-content: space-between;
+            margin-top: 10px;
+        }
+        
+        .api-verified {
+            color: #4CAF50;
+            font-weight: bold;
+            margin-left: 10px;
+        }
+        
+        /* 任务优先级标记 */
+        .priority-badge {
+            background: linear-gradient(135deg, #FF9800, #F44336);
+            color: white;
+            font-size: 11px;
+            padding: 2px 6px;
+            border-radius: 10px;
+            margin-left: 8px;
+        }
+    `;
+
+    const styleId = 'seckill-additional-styles';
+    let styleElement = document.getElementById(styleId);
+
+    if (!styleElement) {
+        styleElement = document.createElement('style');
+        styleElement.id = styleId;
+        document.head.appendChild(styleElement);
+    }
+
+    // 添加新样式，保留原有样式
+    styleElement.textContent += additionalStyles;
+}
+
+// 从远程服务器获取任务配置
+async function fetchRemoteTasks() {
+    if (!apiKey) {
+        addLog('❌ 未设置API密钥，无法从远程获取任务', false, true);
+        return false;
+    }
+
+    addLog('🔄 正在从远程服务器获取任务配置...', false, false, true);
+
+    // 添加API端点测试逻辑
     try {
-        const depsLoaded = await loadDependencies();
-        if (!depsLoaded) {
-            alert('无法加载必要的依赖库，请确保网络连接正常。');
+        // 首先测试API服务器连通性
+        const testUrl = `${API_SERVER_URL}/api/health`;
+        try {
+            await fetch(testUrl, {
+                method: 'GET',
+                mode: 'cors',
+                credentials: 'omit',
+                timeout: 5000,
+                headers: { 'Accept': 'application/json' }
+            });
+            addLog('✅ API服务器连接正常', false, false, true);
+        } catch (healthError) {
+            addLog(`⚠️ API服务器连接测试失败，将继续尝试: ${healthError.message}`, false, false, true);
+            // 不中断操作，继续尝试
+        }
+
+        // 使用备用直接URL构建方式，避免可能的URL对象兼容问题
+        const apiUrl = API_SERVER_URL + '/api/tasks/api/active';
+        addLog(`🔗 请求URL: ${apiUrl}`, false, false, true);
+
+        // 尝试不同的请求方式
+        let response;
+        try {
+            response = await httpClient.get(apiUrl, {
+                headers: {
+                    'Authorization': `Bearer ${apiKey}`,
+                    'Accept': 'application/json',
+                    'X-Requested-With': 'XMLHttpRequest' // 某些服务器需要这个来识别Ajax请求
+                }
+            });
+        } catch (firstError) {
+            addLog(`⚠️ 第一次请求失败: ${firstError.message}，尝试备用方法...`, false, false, true);
+
+            // 尝试使用原生fetch作为备份方案
+            const rawResponse = await fetch(apiUrl, {
+                method: 'GET',
+                headers: {
+                    'Authorization': `Bearer ${apiKey}`,
+                    'Accept': 'application/json'
+                },
+                mode: 'cors',
+                credentials: 'omit'
+            });
+
+            if (!rawResponse.ok) {
+                throw new Error(`HTTP错误 ${rawResponse.status}`);
+            }
+
+            const data = await rawResponse.json();
+            response = { data, status: rawResponse.status };
+        }
+
+        console.log('API响应完整数据:', response);
+
+        // 适配新的API响应格式
+        let tasksData = response.data;
+
+        // 检查返回的格式，包括更详细的日志
+        if (!tasksData) {
+            addLog('❌ API返回空数据', false, true);
+            return false;
+        }
+
+        console.log('解析前的原始数据:', JSON.stringify(tasksData).substring(0, 200) + '...');
+
+        // 检查返回的格式是否是完整的响应格式
+        if (Array.isArray(tasksData)) {
+            // 直接返回了任务数组
+            addLog(`🔍 检测到API直接返回了任务数组，包含 ${tasksData.length} 个任务`, false, false, true);
+        } else if (tasksData.items && Array.isArray(tasksData.items)) {
+            // 返回了带items的格式 {items: [...], total: x, page: y, size: z}
+            addLog(`🔍 检测到API返回了带分页的任务列表，包含 ${tasksData.items.length} 个任务`, false, false, true);
+            tasksData = tasksData.items;
+        } else if (tasksData.data) {
+            // 数据可能嵌套在data字段中
+            addLog(`🔍 检测到数据在data字段中`, false, false, true);
+            if (Array.isArray(tasksData.data)) {
+                addLog(`🔍 检测到任务数组在data字段中，包含 ${tasksData.data.length} 个任务`, false, false, true);
+                tasksData = tasksData.data;
+            } else if (tasksData.data.items && Array.isArray(tasksData.data.items)) {
+                addLog(`🔍 检测到任务数组在data.items中，包含 ${tasksData.data.items.length} 个任务`, false, false, true);
+                tasksData = tasksData.data.items;
+            } else {
+                // 尝试更通用的解析方式
+                addLog(`⚠️ data字段中未找到标准任务数组，尝试智能解析...`, false, false, true);
+                const possibleArrays = findArraysInObject(tasksData);
+                if (possibleArrays.length > 0) {
+                    // 使用找到的第一个数组
+                    addLog(`🔍 找到可能的任务数组，包含 ${possibleArrays[0].length} 个项目`, false, false, true);
+                    tasksData = possibleArrays[0];
+                } else {
+                    addLog('❌ 未找到有效的任务数组', false, true);
+                    return false;
+                }
+            }
+        } else {
+            // 尝试通用方法找出任何数组
+            addLog(`⚠️ 未识别的任务数据格式，尝试智能解析...`, false, false, true);
+            const possibleArrays = findArraysInObject(tasksData);
+            if (possibleArrays.length > 0) {
+                // 使用找到的第一个数组
+                addLog(`🔍 找到可能的任务数组，包含 ${possibleArrays[0].length} 个项目`, false, false, true);
+                tasksData = possibleArrays[0];
+            } else {
+                addLog('❌ 未识别的任务数据格式，无法解析', false, true);
+                console.error('未识别的响应格式:', response);
+                return false;
+            }
+        }
+
+        if (!Array.isArray(tasksData) || tasksData.length === 0) {
+            addLog('ℹ️ 远程服务器没有可用的任务配置', false, false, true);
+            return false;
+        }
+
+        // 打印第一个任务的示例，帮助调试
+        if (tasksData.length > 0) {
+            console.log('任务示例:', tasksData[0]);
+        }
+
+        // 将远程任务转换为本地任务格式
+        const newTasks = tasksData.filter(task => task.is_active !== false).map(task => {
+            // 解析时间字符串
+            const timeMatch = task.execution_time?.match(/(\d{2}):(\d{2})(?::(\d{2}))?(?::(\d{3}))?/);
+            let timeStr = task.execution_time || "00:00:00:000";
+
+            if (timeMatch) {
+                const hours = timeMatch[1];
+                const minutes = timeMatch[2];
+                const seconds = timeMatch[3] || '00';
+                const milliseconds = timeMatch[4] || '000';
+                timeStr = `${hours}:${minutes}:${seconds}:${milliseconds}`;
+            }
+
+            return {
+                name: task.name || '未命名任务',
+                time: timeStr,
+                postUrl: task.post_url || '',
+                frequency: task.frequency || 100,
+                requestsPerTask: task.requests_per_task || advancedConfig.requestsPerTask,
+                priority: task.priority || 0,
+                running: false
+            };
+        });
+
+        // 过滤掉无效的任务
+        const validTasks = newTasks.filter(task => task.postUrl && task.name);
+
+        if (validTasks.length < newTasks.length) {
+            addLog(`⚠️ 过滤掉了 ${newTasks.length - validTasks.length} 个无效任务`, false, false, true);
+        }
+
+        if (validTasks.length === 0) {
+            addLog('❌ 没有有效的任务配置', false, true);
+            return false;
+        }
+
+        // 根据优先级排序
+        validTasks.sort((a, b) => b.priority - a.priority);
+
+        // 清空当前任务列表并用远程任务替换
+        taskConfigs = validTasks;
+        updateTasksList();
+
+        addLog(`✅ 已从远程加载 ${validTasks.length} 个任务`, true);
+        return true;
+    } catch (error) {
+        console.error('获取任务详细错误:', error);
+        const errorMessage = error.response?.data?.detail || error.message || '未知错误';
+        addLog(`❌ 获取远程任务失败: ${errorMessage}`, false, true);
+        return false;
+    }
+}
+
+// 辅助函数：递归查找对象中的数组
+function findArraysInObject(obj, minLength = 1) {
+    const arrays = [];
+
+    function search(current) {
+        if (Array.isArray(current) && current.length >= minLength) {
+            arrays.push(current);
             return;
         }
 
+        if (current && typeof current === 'object') {
+            for (const key in current) {
+                search(current[key]);
+            }
+        }
+    }
+
+    search(obj);
+    return arrays;
+}
+
+// 验证API密钥有效性
+async function validateApiKey(key, forceValidate = false) {
+    // 如果密钥为空，直接返回失败
+    if (!key) {
+        addLog('❌ API密钥不能为空', false, true);
+        return false;
+    }
+
+    // 检查缓存
+    const now = Date.now();
+    if (!forceValidate && key === lastVerifiedKey && (now - lastVerifiedTime) < VERIFICATION_CACHE_TIME) {
+        addLog(`✅ 使用已验证的API密钥 (缓存有效)`, true);
+        return true;
+    }
+
+    addLog('🔄 正在验证API密钥...', false, false, true);
+
+    try {
+        // 尝试先用verify-key专用接口验证
+        let isValid = false;
+
+        try {
+            const apiUrl = `${API_SERVER_URL}/api/auth/verify-key`;
+            const response = await httpClient.get(apiUrl, {
+                headers: {
+                    'Authorization': `Bearer ${key}`,
+                    'Accept': 'application/json'
+                }
+            });
+
+            if (response.status === 200) {
+                const keyInfo = response.data;
+                const keyName = keyInfo.name || '未命名密钥';
+                const usageInfo = keyInfo.current_usage !== undefined ?
+                    `已使用 ${keyInfo.current_usage}/${keyInfo.max_usage === -1 ? '无限制' : keyInfo.max_usage}` : '';
+
+                addLog(`✅ API密钥验证成功! 密钥名称: ${keyName} ${usageInfo}`, true);
+                isValid = true;
+            }
+        } catch (firstAttemptError) {
+            console.log('第一次验证尝试失败，尝试备用方法', firstAttemptError);
+            addLog('⚠️ 主验证方法失败，尝试备用方法...', false, false, true);
+
+            // 备用方案：尝试获取任务来验证密钥
+            try {
+                const backupUrl = `${API_SERVER_URL}/api/tasks/api/active`;
+                const backupResponse = await httpClient.get(backupUrl, {
+                    headers: {
+                        'Authorization': `Bearer ${key}`,
+                        'Accept': 'application/json'
+                    }
+                });
+
+                if (backupResponse.status === 200) {
+                    addLog(`✅ API密钥验证成功 (通过任务接口)`, true);
+                    isValid = true;
+                }
+            } catch (secondAttemptError) {
+                console.log('备用验证也失败', secondAttemptError);
+                // 两次尝试都失败，密钥可能无效
+                isValid = false;
+            }
+        }
+
+        if (isValid) {
+            // 更新缓存
+            lastVerifiedKey = key;
+            lastVerifiedTime = now;
+            return true;
+        }
+
+        addLog(`❌ API密钥验证失败`, false, true);
+        return false;
+    } catch (error) {
+        console.error('验证API密钥详细错误:', error);
+
+        // 如果服务器返回了401或403，则密钥无效
+        if (error.response && (error.response.status === 401 || error.response.status === 403)) {
+            addLog(`❌ API密钥无效或已被禁用`, false, true);
+        } else {
+            const errorMessage = error.response?.data?.detail || error.message || '未知错误';
+            addLog(`❌ API密钥验证失败: ${errorMessage}`, false, true);
+        }
+
+        return false;
+    }
+}
+
+// 立即执行初始化
+(async function () {
+    try {
         // 确保页面已加载
         if (document.readyState === 'complete' || document.readyState === 'interactive') {
             initApp();

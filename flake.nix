@@ -1,28 +1,23 @@
 {
-  description = ''
-    A collection of data pipeline modules implemented in python.
-  '';
+  description = "My awesome python project";
 
   inputs = {
     nixpkgs.url = "github:NixOS/nixpkgs/nixos-24.11";
 
-    utils.url = "github:numtide/flake-utils";
+    flake-parts.url = "github:hercules-ci/flake-parts";
+    flake-parts.inputs.nixpkgs-lib.follows = "nixpkgs";
   };
 
-  outputs = { self, nixpkgs, ... }@inputs:
-    {
-      overlays.dev = nixpkgs.lib.composeManyExtensions [ ];
+  outputs = { self, flake-parts, nixpkgs, ... }@inputs:
 
-    } // inputs.utils.lib.eachSystem ["aarch64-linux" ] (system:
-      let
-        pkgs = import nixpkgs {
-          inherit system;
-          config = { allowUnfree = true; };
-          overlays = [ self.overlays.dev ];
-        };
+    flake-parts.lib.mkFlake { inherit inputs; } {
+      systems = [ "aarch64-linux" "aarch64-darwin" "x86_64-linux" ];
 
-      in {
-        devShells.default = pkgs.callPackage ./nix/dev-shell { };
-        devShells.aarch64-linux = pkgs.callPackage ./nix/dev-shell { };
-      });
+      imports = [ ./nix/dev-shell/default.nix ./nix/exported.nix ];
+
+      perSystem = { system, config, pkgs-dev, ... }: {
+        formatter = pkgs-dev.nixfmt-classic;
+      };
+    };
+
 }
