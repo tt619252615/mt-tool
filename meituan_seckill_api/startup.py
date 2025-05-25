@@ -1,6 +1,7 @@
 import os
 import sys
 import pymysql
+import uvicorn
 from pathlib import Path
 
 # 添加项目路径到Python路径
@@ -18,8 +19,8 @@ if not os.path.exists(config_path):
     sys.exit(1)
 
 # 导入日志系统
-from app.core.logger import logger
-from app.core.config import settings
+from meituan_seckill_api.app.core.logger import logger
+from meituan_seckill_api.app.core.config import settings
 
 def check_database_exists():
     """检查数据库是否存在"""
@@ -96,7 +97,12 @@ def start() -> None:
     
     # 启动服务器
     logger.info("🚀 正在启动API服务器...")
-    os.system("uvicorn app.main:app --host 0.0.0.0 --port 8000")
+    uvicorn.run(
+        "meituan_seckill_api.app.main:app",
+        host="0.0.0.0",
+        port=8000,
+        reload=False
+    )
 
 if __name__ == "__main__":
     logger.info("🚀 ===== 美团秒杀系统启动 =====")

@@ -1,0 +1,12 @@
+# 忽略常见的临时文件和构建输出
+node_modules/
+dist/
+dist-ssr/
+.DS_Store
+*.local
+
+# 忽略日志文件，但不忽略src/pages/logs目录
+/logs/
+**/*.log
+**/*.log.*
+!src/pages/logs/ 

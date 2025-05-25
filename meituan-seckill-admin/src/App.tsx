@@ -8,7 +8,7 @@ import Dashboard from './pages/Dashboard'
 import UserList from './pages/users/UserList'
 import ApiKeyList from './pages/keys/ApiKeyList'
 import TaskList from './pages/tasks/TaskList'
-import LogList from './pages/logs/LogList'
+// import OperationLogList from './pages/operation_logs/OperationLogList'
 import Login from './pages/Login'
 import NotFound from './pages/NotFound'
 
@@ -32,7 +32,7 @@ function App() {
                         <Route path="users" element={<UserList />} />
                         <Route path="keys" element={<ApiKeyList />} />
                         <Route path="tasks" element={<TaskList />} />
-                        <Route path="logs" element={<LogList />} />
+                        {/* <Route path="logs" element={<OperationLogList />} /> */}
                         <Route path="*" element={<NotFound />} />
                     </Route>
                 </Routes>

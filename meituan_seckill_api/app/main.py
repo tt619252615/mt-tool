@@ -24,7 +24,7 @@ app.add_middleware(
 
 DEV_FRONTEND_PATH = Path(
     os.getenv(
-        "CLOUD_TRACE_FRONTEND",
+        "MEITUAN_SECKILL_API_FRONTEND",
         str(Path(__file__).parent.parent.parent / "meituan-seckill-admin" / "dist"),
     )
 )

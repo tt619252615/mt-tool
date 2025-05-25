@@ -51,6 +51,7 @@ in {
         export PS1="$(echo -e '\uf3e2') {\[$(tput sgr0)\]\[\033[38;5;228m\]\w\[$(tput sgr0)\]\[\033[38;5;15m\]} (PersonaX) \\$ \[$(tput sgr0)\]"  
         export PYTHONPATH="$(pwd):$PYTHONPATH"
         export AUX_CLOUD_TRACE_PATH="$(pwd)/cloud_trace/config/aux_cloud_trace.json"
+        export MEITUAN_SECKILL_CONFIG="$(pwd)/meituan_seckill_api/config.json"
       '';
     };
   };
