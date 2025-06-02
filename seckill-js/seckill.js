@@ -20,6 +20,18 @@ let advancedConfig = {
     syncInterval: 5 * 60 * 1000, // 默认5分钟同步一次任务
 };
 
+// 新增页面秒杀模式相关配置和变量
+const SECKILL_URL_PATTERN = 'rights-apigw.meituan.com/api/rights/activity/secKill/info?';
+const SECKILL_GRAB_URL_DEFAULT = 'https://rights-apigw.meituan.com/api/rights/activity/secKill/grab?cType=mtiphone&fpPlatform=5&wx_openid=&appVersion=12.35.401&gdBs=0000&pageVersion=1748795021718&yodaReady=h5&csecplatform=4&csecversion=3.2.0';
+let isPageSeckillEnabled = false; // 是否启用页面秒杀模式
+let pageSecKillTasks = []; // 页面秒杀模式捕获到的任务
+let networkRequests = []; // 存储捕获的网络请求
+
+// 用于缓存API密钥验证结果
+let lastVerifiedKey = '';
+let lastVerifiedTime = 0;
+const VERIFICATION_CACHE_TIME = 30 * 60 * 1000; // 30分钟缓存验证结果
+
 // HTTP客户端 - 使用原生fetch替代axios
 const httpClient = {
     async get(url, options = {}) {
@@ -88,10 +100,13 @@ const httpClient = {
                 ...options.headers
             },
             body: JSON.stringify(data),
-            // 增加跨域相关设置
+            // 修改跨域相关设置，允许发送cookie
             mode: 'cors',
-            credentials: 'omit'
+            credentials: 'include' // 修改为include以发送cookie
         };
+
+        // 调试输出
+        console.log('POST请求配置:', { url, fetchOptions });
 
         try {
             addLog(`📡 发送POST请求: ${url.substring(0, 50)}...`, false, false, true);
@@ -375,6 +390,15 @@ async function start(taskIndex) {
     if (!task) return;
 
     task.running = true;
+
+    // 处理不同类型的任务
+    if (task.type === 'seckill') {
+        // 如果是秒杀任务，调用专用的秒杀启动函数
+        startSecKillTask(taskIndex);
+        return;
+    }
+
+    // 以下是常规抢券任务逻辑
     const couponReferId = extractCouponReferId(task.postUrl);
 
     if (!couponReferId) {
@@ -485,9 +509,16 @@ async function testTask(taskIndex) {
 
     // 测试开始日志
     addLog(`🧪 开始测试任务: "${task.name}"`, false, false, true);
+
+    // 根据任务类型选择测试方式
+    if (task.type === 'seckill') {
+        // 如果是秒杀类型任务，直接调用秒杀测试函数
+        return testSecKillTask(taskIndex);
+    }
+
     addLog(`📋 测试详情: 频率${task.frequency}ms, 时间${task.time}`, false, false, true);
 
-    // 1. 从URL提取券ID
+    // 1. 从URL提取券ID - 在普通抢券模式下需要此步骤
     const couponReferId = extractCouponReferId(task.postUrl);
     if (!couponReferId) {
         addLog('❌ 测试失败：无法从URL提取券ID', false, true);
@@ -572,7 +603,11 @@ async function testTask(taskIndex) {
                     config.headers.mtgsig = mtgsig;
                     addLog(`✅ 成功生成签名`, true);
 
-                    // 7. 发送一次POST请求
+                    // 调试输出完整请求头
+                    console.log('完整请求配置:', config);
+                    addLog(`🔍 Cookie信息: ${document.cookie.substring(0, 30)}...`, false, false, true);
+
+                    // 发送一次POST请求
                     addLog(`📤 发送POST请求(仅一次)...`, false, false, true);
                     const postRes = await httpClient.post(task.postUrl, req.data, config);
 
@@ -649,6 +684,20 @@ function initUI() {
                     <div class="api-key-actions">
                         <button id="verify-api-key-btn" class="small-btn">验证密钥</button>
                         <button id="fetch-tasks-btn" class="small-btn secondary-btn">获取任务</button>
+                    </div>
+                </div>
+            </div>
+            
+            <!-- 新增：秒杀模式控制区域 -->
+            <div class="section">
+                <h3><span class="section-icon">🎯</span> 秒杀模式</h3>
+                <div class="seckill-mode-container">
+                    <div class="seckill-mode-description">
+                        监听网络请求，自动发现秒杀活动并创建抢购任务
+                    </div>
+                    <div class="seckill-mode-actions">
+                        <button id="start-capture-btn" class="small-btn primary-btn">开始捕获</button>
+                        <button id="stop-capture-btn" class="small-btn danger-btn" disabled>停止捕获</button>
                     </div>
                 </div>
             </div>
@@ -792,6 +841,15 @@ function initUI() {
                     <span class="toggle-icon">▼</span>
                 </div>
                 <div id="tasks-container" class="tasks-container collapsible-content"></div>
+            </div>
+            
+            <!-- 新增：秒杀任务列表区域 -->
+            <div class="section">
+                <div class="section-header collapsible" data-target="seckill-tasks-container">
+                    <h3><span class="section-icon">🎯</span> 秒杀任务列表</h3>
+                    <span class="toggle-icon">▼</span>
+                </div>
+                <div id="seckill-tasks-container" class="tasks-container collapsible-content"></div>
             </div>
             
             <div class="section">
@@ -1644,11 +1702,21 @@ function updateTasksList() {
     taskConfigs.forEach((task, index) => {
         const taskItem = document.createElement('div');
         taskItem.className = 'task-item';
+        // 如果是秒杀任务，添加特殊样式
+        if (task.type === 'seckill') {
+            taskItem.classList.add('seckill-task-item');
+        }
+
+        // 准备任务类型标识
+        const typeLabel = task.type === 'seckill' ?
+            '<span class="priority-badge">秒杀模式</span>' :
+            (task.priority > 0 ? `<span class="priority-badge">优先级 ${task.priority}</span>` : '');
+
         taskItem.innerHTML = `
             <div class="task-item-info">
                 <div class="task-item-name">
                     ${task.name}
-                    ${task.priority > 0 ? `<span class="priority-badge">优先级 ${task.priority}</span>` : ''}
+                    ${typeLabel}
                 </div>
                 <div class="task-item-time">
                     <span class="time-icon">⏰</span> ${task.time.split(':').slice(0, 2).join(':')}
@@ -1816,6 +1884,26 @@ function bindEvents() {
             lastVerifiedTime = 0;
         });
     }
+
+    // 新增：秒杀模式相关事件
+    const startCaptureBtn = document.getElementById('start-capture-btn');
+    const stopCaptureBtn = document.getElementById('stop-capture-btn');
+
+    if (startCaptureBtn && stopCaptureBtn) {
+        startCaptureBtn.addEventListener('click', () => {
+            startNetworkCapture();
+            startCaptureBtn.disabled = true;
+            stopCaptureBtn.disabled = false;
+            addLog('🎯 已开启秒杀模式网络捕获', true);
+        });
+
+        stopCaptureBtn.addEventListener('click', () => {
+            stopNetworkCapture();
+            startCaptureBtn.disabled = false;
+            stopCaptureBtn.disabled = true;
+            addLog('🛑 已停止秒杀模式网络捕获', false, false, true);
+        });
+    }
 }
 
 // 定时同步任务
@@ -1895,6 +1983,9 @@ function initApp() {
 
     // 启动时间显示更新
     setInterval(updateTimeDisplay, 1000);
+
+    // 启动秒杀任务倒计时
+    startSecKillCountdown();
 }
 
 // 为CSS添加额外的样式
@@ -1922,6 +2013,62 @@ function appendAdditionalStyles() {
         /* 任务优先级标记 */
         .priority-badge {
             background: linear-gradient(135deg, #FF9800, #F44336);
+            color: white;
+            font-size: 11px;
+            padding: 2px 6px;
+            border-radius: 10px;
+            margin-left: 8px;
+        }
+
+        /* 秒杀模式相关样式 */
+        .seckill-mode-container {
+            display: flex;
+            flex-direction: column;
+            gap: 10px;
+        }
+
+        .seckill-mode-description {
+            font-size: 14px;
+            color: #666;
+            line-height: 1.4;
+            margin-bottom: 5px;
+        }
+
+        .seckill-mode-actions {
+            display: flex;
+            justify-content: flex-start;
+            gap: 10px;
+        }
+
+        .seckill-task-item {
+            border-left: 3px solid #ff7e5f;
+        }
+
+        .countdown {
+            background: #f0f0f0;
+            padding: 2px 6px;
+            border-radius: 10px;
+            margin: 0 5px;
+            font-size: 11px;
+            color: #333;
+        }
+
+        .status-active {
+            background: #4CAF50;
+            color: white;
+            padding: 2px 6px;
+            border-radius: 10px;
+            font-size: 11px;
+        }
+        
+        .stock-info {
+            font-size: 11px;
+            color: #666;
+            margin-left: 5px;
+        }
+        
+        .running-badge {
+            background: #4CAF50;
             color: white;
             font-size: 11px;
             padding: 2px 6px;
@@ -2275,4 +2422,531 @@ function updateTimeDisplay() {
         const [hour, minute, second] = getNowTime();
         timeDisplay.textContent = `${hour}:${minute}:${second}`;
     }
+}
+
+// 新增：页面秒杀模式功能 - 开始网络请求捕获
+function startNetworkCapture() {
+    if (isPageSeckillEnabled) {
+        addLog('⚠️ 网络请求捕获已经在运行中', false, false, true);
+        return;
+    }
+
+    isPageSeckillEnabled = true;
+    addLog('🔍 开始捕获网络请求，寻找秒杀活动...', false, false, true);
+
+    // 实现XHR拦截
+    const originalXhrOpen = XMLHttpRequest.prototype.open;
+    const originalXhrSend = XMLHttpRequest.prototype.send;
+
+    XMLHttpRequest.prototype.open = function (method, url, async, user, password) {
+        this._requestMethod = method;
+        this._requestUrl = url;
+        return originalXhrOpen.apply(this, arguments);
+    };
+
+    XMLHttpRequest.prototype.send = function (body) {
+        const xhr = this;
+        const originalOnReadyStateChange = xhr.onreadystatechange;
+
+        xhr.onreadystatechange = function () {
+            if (xhr.readyState === 4) {
+                try {
+                    // 检查URL是否匹配秒杀API模式
+                    if (xhr._requestUrl && xhr._requestUrl.includes(SECKILL_URL_PATTERN)) {
+                        processSecKillRequest(xhr._requestUrl, xhr.responseText);
+                    }
+                } catch (e) {
+                    console.error('处理XHR响应时出错:', e);
+                }
+            }
+
+            if (originalOnReadyStateChange) {
+                originalOnReadyStateChange.apply(xhr, arguments);
+            }
+        };
+
+        return originalXhrSend.apply(this, arguments);
+    };
+
+    // 实现Fetch拦截
+    const originalFetch = window.fetch;
+    window.fetch = async function (input, init) {
+        const url = (typeof input === 'string') ? input : input.url;
+        const response = await originalFetch.apply(this, arguments);
+
+        try {
+            if (url && url.includes(SECKILL_URL_PATTERN)) {
+                // 克隆响应以便可以多次读取响应体
+                const responseClone = response.clone();
+                const responseText = await responseClone.text();
+                processSecKillRequest(url, responseText);
+            }
+        } catch (e) {
+            console.error('处理Fetch响应时出错:', e);
+        }
+
+        return response;
+    };
+
+    addLog('✅ 网络请求捕获已启动', true);
+}
+
+// 停止网络请求捕获
+function stopNetworkCapture() {
+    if (!isPageSeckillEnabled) {
+        addLog('⚠️ 网络请求捕获未在运行', false, false, true);
+        return;
+    }
+
+    // 恢复原始XHR和Fetch
+    XMLHttpRequest.prototype.open = window.XMLHttpRequest.prototype.originalOpen || XMLHttpRequest.prototype.open;
+    XMLHttpRequest.prototype.send = window.XMLHttpRequest.prototype.originalSend || XMLHttpRequest.prototype.send;
+    window.fetch = window.originalFetch || window.fetch;
+
+    isPageSeckillEnabled = false;
+    addLog('🛑 网络请求捕获已停止', false, false, true);
+}
+
+// 处理捕获到的秒杀请求
+function processSecKillRequest(url, responseText) {
+    try {
+        // 解析URL参数
+        const urlObj = new URL(url);
+        const params = new URLSearchParams(urlObj.search);
+
+        const activityId = params.get('activityId');
+        const gdId = params.get('gdId');
+        const pageId = params.get('pageId');
+        const instanceId = params.get('instanceId');
+
+        if (!activityId || !gdId || !pageId || !instanceId) {
+            console.log('秒杀URL参数不完整:', url);
+            return;
+        }
+
+        // 解析响应体
+        let responseData = null;
+        try {
+            responseData = JSON.parse(responseText);
+        } catch (e) {
+            console.error('解析响应JSON失败:', e);
+            return;
+        }
+
+        // 验证响应数据格式
+        if (!responseData || responseData.code !== 1 || responseData.msg !== '成功' || !responseData.data) {
+            console.log('秒杀响应无效或状态不正确:', responseData);
+            return;
+        }
+
+        const data = responseData.data;
+
+        // 获取当前可抢券信息
+        const currentGrabInfo = data.currentGrabCouponInfo;
+        if (!currentGrabInfo || !currentGrabInfo.token || !currentGrabInfo.roundCode) {
+            console.log('无有效的当前可抢券信息:', data);
+            return;
+        }
+
+        // 获取可用券列表
+        const coupons = currentGrabInfo.coupon;
+        if (!coupons || !Array.isArray(coupons) || coupons.length === 0) {
+            console.log('无有效的券信息:', currentGrabInfo);
+            return;
+        }
+
+        // 遍历券，创建秒杀任务
+        for (const coupon of coupons) {
+            if (!coupon.rightCode || coupon.residueStock <= 0) continue;
+
+            // 创建标准任务格式
+            const couponName = coupon.couponName || '未命名优惠券';
+            const couponAmount = coupon.couponAmount || 0;
+            const startTimestamp = currentGrabInfo.startDate * 1000;
+            const endTimestamp = currentGrabInfo.endDate * 1000;
+
+            // 计算开始时间字符串 (HH:MM:SS:mmm)
+            const startDate = new Date(startTimestamp);
+            const startTimeStr = `${String(startDate.getHours()).padStart(2, '0')}:${String(startDate.getMinutes()).padStart(2, '0')}:${String(startDate.getSeconds()).padStart(2, '0')}:${String(startDate.getMilliseconds()).padStart(3, '0')}`;
+
+            // 构建任务
+            const task = {
+                id: `seckill_${activityId}_${coupon.rightCode}`,
+                name: `${couponAmount}元${couponName}`,
+                type: 'seckill',
+                time: startTimeStr,
+                postUrl: SECKILL_GRAB_URL_DEFAULT,
+                frequency: 100,
+                requestsPerTask: advancedConfig.requestsPerTask,
+                priority: 5, // 默认给页面捕获的任务高优先级
+                running: false,
+                // 秒杀特有参数
+                seckill: {
+                    activityId,
+                    gdId,
+                    pageId,
+                    instanceId,
+                    rightCode: coupon.rightCode,
+                    roundCode: currentGrabInfo.roundCode,
+                    grabToken: currentGrabInfo.token,
+                    startTime: startTimestamp,
+                    endTime: endTimestamp,
+                    couponData: coupon
+                }
+            };
+
+            // 避免重复添加相同任务
+            const existingTaskIndex = pageSecKillTasks.findIndex(t => t.id === task.id);
+            if (existingTaskIndex >= 0) {
+                // 更新已有任务
+                pageSecKillTasks[existingTaskIndex] = task;
+                addLog(`🔄 更新秒杀任务: ${task.name}, 开始时间 ${startTimeStr}`, false, false, true);
+            } else {
+                // 添加新任务
+                pageSecKillTasks.push(task);
+                addLog(`🎯 发现新秒杀任务: ${task.name}, 开始时间 ${startTimeStr}`, true);
+            }
+        }
+
+        // 更新任务列表显示
+        updateSecKillTasksList();
+
+    } catch (e) {
+        console.error('处理秒杀请求时出错:', e);
+    }
+}
+
+// 更新秒杀任务列表
+function updateSecKillTasksList() {
+    const container = document.getElementById('seckill-tasks-container');
+    if (!container) return;
+
+    container.innerHTML = '';
+
+    if (pageSecKillTasks.length === 0) {
+        container.innerHTML = '<div class="empty-tasks">暂未发现任何秒杀任务，请访问秒杀活动页面...</div>';
+        return;
+    }
+
+    // 按开始时间排序
+    pageSecKillTasks.sort((a, b) => a.seckill.startTime - b.seckill.startTime);
+
+    pageSecKillTasks.forEach((task, index) => {
+        // 计算倒计时
+        const now = Date.now();
+        const timeLeft = task.seckill.startTime - now;
+        const timeLeftStr = timeLeft > 0 ?
+            formatTimeLeft(timeLeft) :
+            '<span class="status-active">进行中</span>';
+
+        const coupon = task.seckill.couponData;
+        const stockInfo = coupon ?
+            `${coupon.residueStock || 0}/${coupon.totalStock || '?'}` :
+            '未知/未知';
+
+        const taskItem = document.createElement('div');
+        taskItem.className = 'task-item seckill-task-item';
+        taskItem.innerHTML = `
+            <div class="task-item-info">
+                <div class="task-item-name">
+                    ${task.name}
+                    <span class="priority-badge">秒杀模式</span>
+                </div>
+                <div class="task-item-time">
+                    <span class="time-icon">⏰</span> ${task.time.split(':').slice(0, 2).join(':')}
+                    <span class="countdown">${timeLeftStr}</span>
+                    <span class="stock-info">库存: ${stockInfo}</span>
+                    ${task.running ? '<span class="running-badge">运行中</span>' : ''}
+                </div>
+            </div>
+            <div class="task-item-actions">
+                <button class="add-seckill-task-btn" data-index="${index}" title="添加到任务">添加</button>
+                <button class="test-seckill-task-btn" data-index="${index}" title="测试">测试</button>
+            </div>
+        `;
+        container.appendChild(taskItem);
+    });
+
+    // 绑定按钮事件
+    document.querySelectorAll('.add-seckill-task-btn').forEach(btn => {
+        btn.addEventListener('click', (e) => {
+            const index = parseInt(e.target.getAttribute('data-index'));
+            addSecKillTask(index);
+        });
+    });
+
+    document.querySelectorAll('.test-seckill-task-btn').forEach(btn => {
+        btn.addEventListener('click', (e) => {
+            const index = parseInt(e.target.getAttribute('data-index'));
+            e.target.classList.add('loading');
+            testSecKillTask(index).finally(() => {
+                setTimeout(() => {
+                    e.target.classList.remove('loading');
+                }, 500);
+            });
+        });
+    });
+}
+
+// 格式化倒计时显示
+function formatTimeLeft(milliseconds) {
+    if (milliseconds < 0) return '已开始';
+
+    const totalSeconds = Math.floor(milliseconds / 1000);
+    const hours = Math.floor(totalSeconds / 3600);
+    const minutes = Math.floor((totalSeconds % 3600) / 60);
+    const seconds = totalSeconds % 60;
+
+    if (hours > 0) {
+        return `${hours}小时${minutes}分钟`;
+    } else if (minutes > 0) {
+        return `${minutes}分${seconds}秒`;
+    } else {
+        return `${seconds}秒`;
+    }
+}
+
+// 添加秒杀任务到主任务列表
+function addSecKillTask(index) {
+    const task = pageSecKillTasks[index];
+    if (!task) {
+        addLog('❌ 任务不存在', false, true);
+        return;
+    }
+
+    // 检查重复添加
+    const existingTaskIndex = taskConfigs.findIndex(t =>
+        t.type === 'seckill' && t.id === task.id);
+
+    if (existingTaskIndex >= 0) {
+        addLog(`⚠️ 该秒杀任务已经添加到任务列表`, false, false, true);
+        return;
+    }
+
+    // 克隆任务并添加到主任务配置
+    const newTask = { ...task };
+    taskConfigs.push(newTask);
+
+    // 更新任务列表显示
+    updateTasksList();
+    addLog(`✅ 已添加秒杀任务: ${task.name}`, true);
+}
+
+// 测试秒杀任务
+async function testSecKillTask(index) {
+    const task = pageSecKillTasks[index];
+    if (!task) {
+        addLog('❌ 任务不存在', false, true);
+        return;
+    }
+
+    // 测试开始日志
+    addLog(`🧪 开始测试秒杀任务: "${task.name}"`, false, false, true);
+    addLog(`📋 测试详情: ${JSON.stringify(task.seckill).substring(0, 100)}...`, false, false, true);
+
+    // 生成指纹
+    addLog(`🔐 开始生成请求指纹...`, false, false, true);
+    let mtF = "";
+    try {
+        mtF = window.H5guard.getfp();
+        addLog(`✅ 成功生成指纹 (长度: ${mtF.length})`, true);
+    } catch (e) {
+        addLog(`❌ 生成指纹失败: ${e.message}`, false, true);
+        return;
+    }
+
+    // 配置请求头
+    const config = {
+        headers: {
+            Cookie: document.cookie // 去掉多余的引号
+        }
+    };
+
+    // 准备POST请求数据
+    addLog(`📝 准备秒杀POST请求数据...`, false, false, true);
+    const seckillData = {
+        "activityId": task.seckill.activityId,
+        "gdId": parseInt(task.seckill.gdId),
+        "pageId": parseInt(task.seckill.pageId),
+        "instanceId": task.seckill.instanceId,
+        "rightCode": task.seckill.rightCode,
+        "roundCode": task.seckill.roundCode,
+        "grabToken": task.seckill.grabToken,
+        "mtFingerprint": mtF
+    };
+
+    // 准备请求对象
+    let req = {
+        "url": task.postUrl,
+        "method": "POST",
+        "headers": {
+            "Content-Type": "application/json",
+            "content-type": "application/json",
+            "content-encoding": "",
+            "Cookie": document.cookie // 去掉多余的引号
+        },
+        "data": seckillData
+    };
+
+    // 测试签名生成
+    addLog(`🔏 生成请求签名...`, false, false, true);
+    try {
+        const signRes = await window.H5guard.sign(req);
+        const mtgsig = signRes.headers.mtgsig;
+        config.headers.mtgsig = mtgsig;
+        addLog(`✅ 成功生成签名`, true);
+        addLog(`🍪 Cookie长度: ${config}`, false, false, true);
+
+        // 发送一次POST请求
+        addLog(`📤 发送POST请求(仅一次)...`, false, false, true);
+        const postRes = await httpClient.post(task.postUrl, req.data, config);
+
+        // 输出POST响应结果
+        if (postRes.data) {
+            addLog(`📨 收到响应: ${JSON.stringify(postRes.data).substring(0, 100)}...`, false, false, true);
+
+            if (postRes.data.code === 0 || postRes.data.msg === '成功') {
+                addLog(`🎉 模拟秒杀成功! ${postRes.data.msg}`, true);
+            } else if (postRes.data.msg === '时间验证失败') {
+                addLog(`⏰ 时间验证失败 - 实际秒杀时会持续重试`, false, false, true);
+            } else {
+                addLog(`ℹ️ 秒杀结果: ${postRes.data.msg}`, false, false, true);
+            }
+        } else {
+            addLog(`❓ 收到空响应`, false, true);
+        }
+
+        // 总结测试结果
+        addLog(`📑 测试完成! 秒杀任务有效`, true);
+        const timeLeft = task.seckill.startTime - Date.now();
+        if (timeLeft > 0) {
+            addLog(`⏰ 秒杀将在${formatTimeLeft(timeLeft)}后开始`, false, false, true);
+        } else {
+            addLog(`⏰ 秒杀已经开始! 可以立即运行`, false, false, true);
+        }
+    } catch (err) {
+        addLog(`❌ 签名或POST请求失败: ${err.message || '未知错误'}`, false, true);
+    }
+}
+
+// 进行秒杀请求
+async function sendSecKillRequest(task, config, taskIndex) {
+    totalRequests++;
+    updateStatusDisplay();
+
+    // 生成指纹
+    let mtF = "";
+    try {
+        mtF = window.H5guard.getfp();
+    } catch (e) {
+        addLog('获取指纹失败: ' + e.message, false, true);
+        return;
+    }
+
+    // 准备秒杀请求数据
+    const seckillData = {
+        "activityId": task.seckill.activityId,
+        "gdId": parseInt(task.seckill.gdId),
+        "pageId": parseInt(task.seckill.pageId),
+        "instanceId": task.seckill.instanceId,
+        "rightCode": task.seckill.rightCode,
+        "roundCode": task.seckill.roundCode,
+        "grabToken": task.seckill.grabToken,
+        "mtFingerprint": mtF
+    };
+
+    // 准备请求
+    let req = {
+        "url": task.postUrl,
+        "method": "POST",
+        "headers": {
+            "Content-Type": "application/json",
+            "content-type": "application/json",
+            "content-encoding": "",
+            "Cookie": document.cookie // 去掉多余的引号
+        },
+        "data": seckillData
+    };
+
+    try {
+        // 生成签名
+        const signRes = await window.H5guard.sign(req);
+        const mtgsig = signRes.headers.mtgsig;
+        config.headers.mtgsig = mtgsig;
+
+        // 发送post请求
+        const res = await httpClient.post(task.postUrl, req.data, config);
+
+        // 处理响应
+        if (res.data.msg === '时间验证失败') {
+            addLog('时间验证失败，继续尝试...', false, false, true);
+        } else {
+            if (res.data.code === 0 || res.data.msg === '成功') {
+                addLog('🎉 秒杀成功! ' + res.data.msg, true);
+                successRequests++;
+                priorityRequests++;
+                taskConfigs[taskIndex].running = false;
+            } else {
+                addLog('秒杀结果: ' + res.data.msg, false, false, true);
+                if (res.data.msg.includes('已经')) {
+                    taskConfigs[taskIndex].running = false;
+                }
+            }
+            updateStatusDisplay();
+        }
+    } catch (err) {
+        addLog('请求失败: ' + (err.message || '未知错误'), false, true);
+        taskConfigs[taskIndex].running = false;
+    }
+}
+
+// 开始秒杀任务
+async function startSecKillTask(taskIndex) {
+    const task = taskConfigs[taskIndex];
+    if (!task || task.type !== 'seckill') return;
+
+    task.running = true;
+
+    // 配置请求头
+    const config = {
+        headers: {
+            Cookie: document.cookie // 去掉多余的引号
+        }
+    };
+
+    addLog(`🚀 开始秒杀任务: ${task.name}`, false, false, true);
+
+    // 设置请求计数器
+    let requestCount = 0;
+    const maxRequests = task.requestsPerTask || advancedConfig.requestsPerTask;
+
+    // 启动定期发送请求
+    const interval = setInterval(() => {
+        if (!task.running) {
+            clearInterval(interval);
+            addLog(`⏹️ 停止秒杀任务: ${task.name}`, false, false, true);
+            return;
+        }
+
+        // 检查请求次数限制
+        if (maxRequests > 0 && requestCount >= maxRequests) {
+            clearInterval(interval);
+            addLog(`⏹️ 任务 ${task.name} 已完成 ${maxRequests} 次请求，任务结束`, false, false, true);
+            task.running = false;
+            return;
+        }
+
+        sendSecKillRequest(task, config, taskIndex);
+        requestCount++;
+    }, task.frequency);
+}
+
+// 启动定时更新秒杀任务倒计时显示
+function startSecKillCountdown() {
+    // 每秒更新倒计时
+    setInterval(() => {
+        if (pageSecKillTasks.length > 0) {
+            updateSecKillTasksList();
+        }
+    }, 1000);
 }
